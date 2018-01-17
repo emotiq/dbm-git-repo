@@ -6,9 +6,9 @@
 (in-package :ads)
 
 (defclass treap ()
-  ((prob
-    :reader   treap-prob
-    :initarg  :prob)
+  ((prio
+    :reader   treap-prio
+    :initarg  :prio)
    (key
     :reader   treap-key
     :initarg  :key)
@@ -26,7 +26,7 @@
 
 (defmethod shallow ((node treap))
   (make-instance 'treap
-                 :prob  (treap-prob node)
+                 :prio  (treap-prio node)
                  :key   (treap-key node)
                  :val   (treap-val node)
                  :left  (shallow (treap-left node))
@@ -60,10 +60,24 @@
     (insert-items items nil)))
 |#
 
+;; ------------------------------------------------------------
+;; PROBE -- get past the Auth-Type envelope to the contained item
+
+(defmethod probe (x)
+  x)
+
+(defmethod probe ((x prover))
+  (probe (prover-val x)))
+
+(defmethod probe ((x digest))
+  (error "Can't probe a Digest"))
+
+;; ------------------------------------------------------------
+
 (defmethod insert (item tree)
   (insert
    (make-instance 'treap
-                  :prob (treap-prob-for-item item)
+                  :prio (treap-prio-for-item item)
                   :key  (treap-key-for-item item)
                   :val  item)
    tree))
@@ -71,21 +85,41 @@
 (defmethod insert ((node treap) (tree null))
   (auth node))
 
+(defmethod insert (node ((tree auth-type)))
+  (insert node (unauth tree)))
+
 (defmethod insert ((node treap) (tree treap))
   (let* ((node-key (treap-key node))
          (top-key  (treap-key tree))
-         (cmp      (compare node-key top-key)))
-    (cond ((zerop cmp)
+         (kcmp     (compare node-key top-key)))
+    (cond ((zerop kcmp)
            (setf (treap-left node) (treap-left tree)
                  (treap-right node) (treap-right tree))
            (auth node))
 
-          ((minusp cmp)
-           (let ((pcmp (compare (treap-prob node) (treap-prob tree))))
+          ((minusp kcmp)
+           (let* ((left-child (insert node (treap-left tree)))
+                  (tleft      (probe left-child))
+                  (pcmp       (compare (treap-prio tleft) (treap-prio tree))))
              (cond ((plusp pcmp)
-                    
-             (insert node (treap-left tree)))
+                    (setf (treap-left tree) (treap-right tleft)
+                          (treap-right tleft) (auth tree))
+                    (auth tleft))
+                   (t
+                    (setf (treap-left tree) left-child)
+                    (auth tree))
+                   )))
 
-          ((plusp cmp)
-           (insert node (treap-right tree)))
-                              
+          ((plusp kcmp)
+           (let* ((right-child (insert node (treap-right tree)))
+                  (tright      (probe right-child))
+                  (pcmp        (compare (treap-prio tright) (treap-prio tree))))
+             (cond ((plusp pcmp)
+                    (setf (treap-right tree) (treap-left tright)
+                          (treap-left tright) (auth tree))
+                    (auth tright))
+                   (t
+                    (setf (treap-right tree) right-child)
+                    (auth tree))
+                   )))
+          )))
