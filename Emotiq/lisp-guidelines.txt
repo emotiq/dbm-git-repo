@@ -1,0 +1,127 @@
+
+* 1/9/18: Emotique Externals Layer - Coding Conventions
+- All external software references go through a conceptual Emotique
+  Externals layer
+
+- Let's choose a nice short abbreviation for "Emotique Externals": emex
+
+- We can define the package with the full name "Emotique Externals"
+  and the nickname "emex", but basically everywhere else, i.e., in all
+  source code, the spelling "emex", all lowercase, should be used. It
+  adds the nice quality of consistency and facilitates global text
+  searching, and text replacement if we ever decided to change this
+  name globally for some reason.
+
+- emex package(s) - for simplicity there should be very few Lisp
+  packages to handle the importing and exporting of all symbols from
+  external software that we will reference.  Let's start with and try
+  to keep it to one, 'emex', but this need not be a hard and fast
+  rule.
+
+- Always use explicit package names in source code above the externals
+  layer, i.e., do not import all symbols as local packages.  If a
+  symbol foo is defined in package emex, it must be refered to as
+  emex:foo, not as foo, having imported into the higher package.
+
+- emex.lisp file(s) - for simplicity there should be very few Lisp
+  files to handle interfaces to external software. Let's start with
+  and try to keep it to one, 'emex.lisp', but this need not be a hard
+  and fast rule.
+
+- For modularity no references to internal emex package symbols are
+  ever allowed above emex layer -- i.e., no use of double colon
+  (emex::foo), only single colon (emex:foo)
+
+- For modularity, abstraction, and safe and proper use of external
+  software, no use of internal symbols of external software is ever
+  allowed except in cases of need.  In such cases, in general, create
+  a "ticket" or "task" about this with a plan, e.g., to talk to the
+  external software developers to get them to export (and support) the
+  currently internal symbol. For the immediate need, get approval of
+  at least one other senior colleague, and note this approval in a
+  commit message along with the task ID.  Put in a comment at the code
+  site why this is necessary, using our convention (TBD: e.g., ---***
+  ... <date> <initials>) for such "fixme"-type comments.
+
+- Important: emex is NOT simply a switching yard for translating
+  packages and doing trival name transformations. It is our way to
+  declare all and only the abstractions we need now and for the
+  future.  If it's something we cannot do now, the implementation may
+  be a stub (with some TBD method of handling - errors, warnings,
+  crashes, etc.).  If it's something we cannot do on every supported
+  version of Common Lisp, it might be stubbed on just some
+  implementations.  If it's something that we want to implement one
+  way for simplicity in the short run, e.g., to get to a "MVP", we
+  want an API declaration that would allow us to substitute in a more
+  ambitious implementation later on.  For example, in the case of
+  crypto in the short run we would implement API functions using
+  Ironclad, an open source Common Lisp package, but down the road we
+  would want to be in a position to use NaCl due to its extreme
+  maturity, stability, huge external ongoing maintenance "armies",
+  etc., via C foreign function interfaces. But c foreign functions are
+  a pain.  Our approach should allow us to plug in the C FFI
+  implementation without changing any code above the emex layer. One
+  could even allow runtime or compile-time choice of the
+  implementation as a development or testing tool.
+
+  - The following is an example of using functions defined at the emex
+    layer. The code at higher layers would not need to know how it's
+    implemented, whether via C FFI to NaCl or Ironclad:
+
+    (emex:sha256 "Rosetta code") => "764faf5c61ac315f1497f9dfa542713965b785e5cc2f707d6468d7d1124cdfcf"
+
+    (with-input-from-string (in "Rosetta code")
+      (emex:sha256-from-stream in)) => "764faf5c61ac315f1497f9dfa542713965b785e5cc2f707d6468d7d1124cdfcf"
+
+
+- Keep a log of entries whenever a new system is used, directly or
+  indirectly (e.g., via an indirect dependency). At each log entry, a
+  signoff should be required by the the person who introduced the
+  dependency stating the basic purpose/need, and the licensing
+  situation (something MIT: good, GPL: bad, etc.).  Then there should
+  be signoff from, say, Joel (for the company) and Zack (for his
+  near-encyclopedic knowledge of all software, especially Lisp,
+  libraries).  It does not have to always be filled in: it should be
+  checkoff item prior to final release. (I'm not sure about this: are
+  we in "continual release" mode?)
+
+  - I think we should get guidance from Zach and Joel on this as
+    regards the business/legal/IP issues.
+
+- Putting this in an externals layer in which we explicitly declare
+  and define and limit our interfaces helps us in the long run by
+  decreasing our footprint in other software, allowing us the
+  flexibility to move to other implementations when and if needed.
+
+- We also have to use caution in our use of libraries in terms of
+  licensing lest we "infect" our code with commercially unacceptable
+  licenses such as full-on GPL
+
+- We should use the above approach for *every* external system and
+  package that we plan to use
+
+-----
+
+Rationale for one 'emex' package / one 'emex' lisp file, at least as a
+start:
+
+One might be wary of a *single* package for all external symbols,
+since names clashes can become more likely, especially for large
+software projects and especially as an organization grows.  And having
+per-context package names could enable shorter context-specific
+names. For example, we could define emex-crypto:update as opposed to
+needing to define emex:update-digest.
+
+About this, first it's kind of nice to try, and then we can back off
+it it's really so terrible. Second, it seems it will save time and
+overhead, since dealing with multiple package names, multiple files,
+multiple systems does have its cost. I think our desire to get as
+quickly as possible to an MVP helps justify this.  To make up for not
+having nice short names that you can use without worrying about
+conflict, you at least can have one nice short package name -- emex --
+as your package name.  I'm afraid we might have emex-crypto:foo, where
+foo is a nice short name, but emex-crypto is kind of long.  Second,
+making the names a little longer to avoid conflict often as not tends
+to make them self-documenting and easier to understand, I find, so it
+ends up being kind of a wash.
+
