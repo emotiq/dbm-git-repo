@@ -18,6 +18,7 @@
                 (:file "auth-merkle-tree")
                 (:file "auth-vector")
                 (:file "auth-list")
+                (:file "auth-treap")
                 )
   :SERIAL T
   :depends-on   (:ironclad
