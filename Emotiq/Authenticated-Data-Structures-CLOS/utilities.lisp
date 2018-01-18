@@ -20,6 +20,7 @@
          (or ,cname
              (setf ,cname ,creator)))) ))
 
+#+:LISPWORKS
 (editor:setup-indent "def-cached-var" 1)
 
 ;; -----------------------------------------------------------------------------
