@@ -128,4 +128,48 @@
 
 ;; -----------------------------------------------------------------------------
 
+(defmacro if-let ((arg form) t-form &optional f-form)
+  `(let ((,arg ,form))
+     (if ,arg
+         ,t-form
+       ,f-form)))
+
+#+:LISPWORKS
+(editor:setup-indent "if-let" 1)
+
+(defmacro when-let ((arg form) &body body)
+  `(let ((,arg ,form))
+     (when ,arg
+       ,@body)))
+
+#+:LISPWORKS
+(editor:setup-indent "when-let" 1)
+
+;; ------------------------------------------------------------
+
+(defmethod compare ((k1 real) (k2 real))
+  (- k1 k2))
+
+(defmethod compare ((k1 character) (k2 character))
+  (compare (char-code k1) (char-code k2)))
+
+(defmethod compare ((k1 symbol) (k2 symbol))
+  (compare (symbol-name k1) (symbol-name k2)))
+
+(defmethod compare ((k1 vector) (k2 vector))
+  (let ((len1  (length k1))
+        (len2  (length k2)))
+    (labels ((iter (ix)
+               (if (and (< ix len1)
+                        (< ix len2))
+                   (let ((cmp (compare (aref k1 ix) (aref k2 ix))))
+                     (if (zerop cmp)
+                         (iter (1+ ix))
+                       cmp))
+                 ;; else
+                 (- len1 len2))))
+      (iter 0))))
+
+(defmethod compare ((k1 hash-val) (k2 hash-val))
+  (compare (hash-val-ubvec k1) (hash-val-ubvec k2)))
 
