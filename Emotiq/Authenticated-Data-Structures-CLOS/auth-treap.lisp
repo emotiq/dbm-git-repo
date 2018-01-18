@@ -100,19 +100,18 @@
          (kcmp     (compare node-key top-key)))
     (cond ((zerop kcmp)
            ;; replace existing by node
-           (clone-node node
-                       :left  (treap-left tree)
-                       :right (treap-right tree)))
+           (setf (treap-left node) (treap-left tree)
+                 (treap-right node) (treap-right tree))
+           (auth node))
 
           ((minusp kcmp)
            (let* ((left-child (insert node (treap-left tree)))
                   (tleft      (probe left-child))
                   (pcmp       (compare (treap-prio tleft) (treap-prio tree))))
              (cond ((plusp pcmp)
-                    (let ((new-tree (clone-node tree
-                                                :left (treap-right tleft))))
-                      (clone-node tleft
-                                  :right new-tree)))
+                    (clone-node tleft
+                                :right (clone-node tree
+                                                   :left (treap-right tleft))))
                    (t
                     (clone-node tree
                                 :left left-child))
@@ -123,10 +122,9 @@
                   (tright      (probe right-child))
                   (pcmp        (compare (treap-prio tright) (treap-prio tree))))
              (cond ((plusp pcmp)
-                    (let ((new-tree (clone-node tree
-                                                :right (treap-left tright))))
-                      (clone-node tright
-                                  :left new-tree)))
+                    (clone-node tright
+                                :left (clone-node tree
+                                                  :right (treap-left tright))))
                    (t
                     (clone-node tree
                                 :right right-child))
