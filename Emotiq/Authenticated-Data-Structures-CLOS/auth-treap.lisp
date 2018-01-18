@@ -65,26 +65,6 @@
                   :right right)))
 
 ;; ------------------------------------------------------------
-#|
-(defun make-authenticated-treap (&rest items)
-  ;; construct a fully authenticated treap from a list of items
-  (labels ((insert-items (items tree)
-             (if (endp items)
-                 (auth tree)
-               (let* ((item (car items))
-                      (key  (treap-key-for-item item)))
-                 (insert-items (cdr items)
-                               (if tree
-                                   ()
-                                 ;; else - empty tree
-                                 (make-instance 'treap
-                                                :key key
-                                                :val item))))
-               )))
-    (insert-items items nil)))
-|#
-
-;; ------------------------------------------------------------
 ;; PROBE -- get past the Auth-Type envelope to the contained item
 
 (defmethod probe (x)
