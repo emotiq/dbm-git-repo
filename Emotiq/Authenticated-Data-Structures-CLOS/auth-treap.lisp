@@ -195,6 +195,7 @@
 ;; --------------------------------------------------------------------
 
 #|
+ ;; test it out... result should be independent of insertion order
 (let* ((items '(:one :two :three :four :five :six :seven))
        (tree  (apply 'make-authenticated-treap items)))
   (inspect tree)
