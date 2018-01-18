@@ -134,12 +134,10 @@
           )))
 
 (defun make-authenticated-treap (&rest items)
-  (labels ((iter (items tree)
-             (if (endp items)
-                 tree
-               (iter (cdr items) (insert (car items) tree)))
-             ))
-    (iter items nil)))
+  (reduce (lambda (tree item)
+            (insert item tree))
+          items
+          :initial-value nil))
 
 ;; --------------------------------------------------------------------
 ;; for visual debugging...
