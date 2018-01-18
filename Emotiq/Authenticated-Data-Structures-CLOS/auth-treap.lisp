@@ -145,58 +145,52 @@
 ;; for visual debugging...
 
 #+:LISPWORKS
-(defmethod treap-children (node layout)
-  nil)
+(progn
+  (defmethod treap-children (node layout)
+    nil)
+  
+  (defmethod treap-children ((node prover) layout)
+    (treap-children (probe node) layout))
 
-#+:LISPWORKS
-(defmethod treap-children ((node prover) layout)
-  (treap-children (probe node) layout))
+  (defmethod treap-children ((node treap) layout)
+    (multiple-value-bind (l r)
+        (values (treap-left node)
+                (treap-right node))
+      (let ((lx (or l
+                    (vector)))
+            (rx (or r
+                    (vector))))
+        (cond ((and (null l)
+                    (null r))
+               nil)
+              (t
+               (case layout
+                 ((:left-right :right-left) (list rx lx))
+                 (t   (list lx rx))))
+              ))))
 
-#+:LISPWORKS
-(defmethod treap-children ((node treap) layout)
-  (multiple-value-bind (l r)
-      (values (treap-left node)
-              (treap-right node))
-    (let ((lx (or l
-                  (vector)))
-          (rx (or r
-                  (vector))))
-      (cond ((and (null l)
-                  (null r))
-             nil)
-            (t
-             (case layout
-               ((:left-right :right-left) (list rx lx))
-               (t   (list lx rx))))
-            ))))
+  (defmethod print-node (x keyfn)
+    nil)
 
-#+:LISPWORKS
-(defmethod print-node (x keyfn)
-  nil)
+  (defmethod print-node ((node prover) keyfn)
+    (print-node (probe node) keyfn))
 
-#+:LISPWORKS
-(defmethod print-node ((node prover) keyfn)
-  (print-node (probe node) keyfn))
+  (defmethod print-node ((node treap) keyfn)
+    (format nil "~A" (funcall keyfn (treap-key node))))
+  
+  (defmethod view-treap ((tree prover) &key (key #'identity) (layout :left-right))
+    (view-treap (probe tree) :key key :layout layout))
 
-#+:LISPWORKS
-(defmethod print-node ((node treap) keyfn)
-  (format nil "~A" (funcall keyfn (treap-key node))))
-
-#+:LISPWORKS
-(defmethod view-treap ((tree prover) &key (key #'identity) (layout :left-right))
-  (view-treap (probe tree) :key key :layout layout))
-
-#+:LISPWORKS
-(defmethod view-treap ((tree treap) &key (key #'identity) (layout :left-right))
-  (capi:contain
-   (make-instance 'capi:graph-pane
-                  :layout-function layout
-                  :roots (list tree)
-                  :children-function (lambda (node)
-                                       (treap-children node layout))
-                  :print-function (lambda (node)
-                                    (print-node node key))
-                  )))
+  (defmethod view-treap ((tree treap) &key (key #'identity) (layout :left-right))
+    (capi:contain
+     (make-instance 'capi:graph-pane
+                    :layout-function layout
+                    :roots (list tree)
+                    :children-function (lambda (node)
+                                         (treap-children node layout))
+                    :print-function (lambda (node)
+                                      (print-node node key))
+                    ))))
 
 ;; --------------------------------------------------------------------
 
