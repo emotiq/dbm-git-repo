@@ -149,7 +149,29 @@
     (when timer
       (- (%timer-expire-time timer) (get-precise-time)))))
 
+#+:SBCL
+(defmacro with-optional-timeout (delay &body body)
+  (let ((d (gensym)))
+    `(let ((,d ,delay))
+       (cond ((null ,d)
+              ,@body)
+             ((<= ,d (float (/ 1 internal-time-units-per-second))) ; XXX NOT 0
+              (error 'sb-ext:timeout))
+             (t (sb-ext:with-timeout ,d
+                  ,@body))))))
 
+#+:SBCL
+(defun scheduler ()
+  (loop
+   (expire-pending-timers)
+   (let ((delay (time-to-next-timer)))
+     (handler-case
+         (with-optional-timeout delay
+           (let ((message (next-control-message)))
+             (process-control-message message)))
+       (sb-ext:timeout () nil)))))
+
+#+:ALLEGRO ;; NYI
 (defmacro with-optional-timeout (delay &body body)
   (let ((d (gensym)))
     `(let ((,d ,delay))
@@ -161,6 +183,7 @@
                   ,@body))))))
 
 
+#+:ALLEGRO ;; NYI
 (defun scheduler ()
   (loop
    (expire-pending-timers)
@@ -178,8 +201,11 @@
 ;;;
 
 (defvar *timers-enabled-p* nil)
-(defvar *timers-enabled-mutex* (sb-thread:make-mutex))
+(defvar *timers-enabled-mutex*
+  #+:SBCL (sb-thread:make-mutex)
+  #+:ALLEGRO (mp:make-process-lock))
 
+#+:SBCL
 (defun enable-timers ()
   (sb-thread:with-mutex (*timers-enabled-mutex*)
     (unless *timers-enabled-p*
@@ -189,6 +215,18 @@
 				      (scheduler)
 				   ;; XXX this doesn't seem to run if
 				   ;;  the thread is killed
+				   (setf *timers-enabled-p* nil))))
+      (values))))
+
+#+:ALLEGRO
+(defun enable-timers ()
+  (mp:with-process-lock (*timers-enabled-mutex*)
+    (unless *timers-enabled-p*
+      (setf *timers-enabled-p* t)
+      (mp:process-run-function "Timer Executive"
+                               (lambda ()
+				 (unwind-protect
+                                     (scheduler)
 				   (setf *timers-enabled-p* nil))))
       (values))))
 

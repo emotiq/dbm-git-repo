@@ -197,7 +197,11 @@
                 :initarg  :selector-fn)
    (timeout-fn  :reader   recv-info-timeout-fn
                 :initarg  :timeout-fn)
-   (timer       :reader   recv-info-timer
+   ;; sharing lock for timer - concession for ACL
+   (lock        :reader   recv-info-timer-lock
+                :initform (mpcompat:make-lock))
+   ;; currently active timer - when nil => none
+   (timer       :accessor recv-info-timer
                 :initarg  :timer)))
 
 ;; ----------------------------------------
@@ -233,24 +237,55 @@
                          :id          this-id
                          :selector-fn conds-fn
                          :timeout-fn  timeout-fn
-                         :timer
-                         (when timeout-expr
-                           #+:LISPWORKS
-                           (let ((timer (mp:make-timer
-                                         #'send self
-                                         :recv-timeout-{3A95A26E-D84E-11E7-9D93-985AEBDA9C2A}
-                                         this-id) ))
-                             (mp:schedule-timer-relative timer timeout-expr)
-                             timer)
-                           #+:ALLEGRO
-                           (mp:process-run-function
-                            "RECV Timeout Timer"
-                            (lambda ()
-                              (mp:process-sleep timeout-expr)
-                              (send self
-                                    :recv-timeout-{3A95A26E-D84E-11E7-9D93-985AEBDA9C2A}
-                                    this-id))) )
+                         :timer       (make-timeout-timer timeout-expr self this-id)
                          ))))
+
+;; -------------------------------------------------------------
+;; Timeout Timers...
+
+(defun send-timeout-message (self this-id)
+  (when (readout-timer (actor-recv-info self) this-id)
+    ;; are we still awaited?
+    (send self
+          :recv-timeout-{3A95A26E-D84E-11E7-9D93-985AEBDA9C2A}
+          this-id)))
+
+#+:LISPWORKS
+(defun make-timeout-timer (delta self this-id)
+  (when delta
+    (let ((timer (mp:make-timer
+                  'send-timeout-message self this-id)))
+      (mp:schedule-timer-relative timer delta)
+      timer)))
+
+#+:ALLEGRO
+(defun make-timeout-timer (delta self this-id)
+  (when delta
+    (mp:process-run-function
+     "RECV Timeout Timer"
+     (lambda ()
+       (mp:process-sleep delta)
+       (send-timeout-message self this-id))
+     )))
+  
+(defmethod readout-timer ((info recv-info) tid)
+  ;; destructively read out the timer
+  (when info
+    ;; might not be any info by now...
+    (mpcompat:with-lock (recv-info-timer-lock info)
+      (when (eq tid (recv-info-id info))
+        ;; might be a new timer info block...
+        (shiftf (recv-info-timer info) nil)))))
+
+(defmethod kill-timer ((info recv-info))
+  (when-let (timer (readout-timer info (recv-info-id info)))
+    #+:LISPWORKS
+    (mp:unschedule-timer timer)
+    #+:ALLEGRO
+    (mp:process-kill timer)
+    ))
+
+;; -------------------------------------------------------------
 
 (defmethod actor-recv-test-message ((self actor) msg)
   ;; see if the incoming message matches one of our RECV handlers
@@ -258,9 +293,7 @@
          (ans-fn    (funcall (recv-info-selector-fn recv-info) msg)))
     (if ans-fn
         (progn
-          #+:LISPWORKS
-          (when-let (timer (recv-info-timer recv-info))
-            (mp:unschedule-timer timer))
+          (kill-timer recv-info)
           (enqueue-replay self recv-info)
           (funcall ans-fn))
       ;; else - not a message we are looking for
