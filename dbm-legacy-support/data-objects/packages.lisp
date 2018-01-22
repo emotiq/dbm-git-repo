@@ -22,6 +22,8 @@
 
 (defpackage #:priq
   (:use #:common-lisp)
+  (:import-from :mpcompat
+   :CAS)
   (:export
    #:unsafe-lifo
    #:lifo

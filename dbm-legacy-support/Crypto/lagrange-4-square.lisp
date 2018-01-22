@@ -23,6 +23,8 @@
 
 (declaim (inline mod4 mod8 trunc2 trunc4 expt2))
 
+;; ------------------------------------------------------------------
+
 (defun mod4 (n)
   (declare (integer n))
   (ldb (byte 2 0) n))
@@ -46,17 +48,18 @@
 ;; ------------------------------------------------------------------
 ;; DECOMPOSE-INTEGER -- main entry point
 
-(defun #1=decompose-integer (n)
+(defun decompose-integer (n)
   ;; slightly smarter version
   (declare (integer n))
   (check-type n (integer 0))
   (if (zerop n)
-      (list 0 0 0 0)
+      '(0 0 0 0)
     ;; else - pull out common factor of (2^v)^2 = 4^v
     (multiple-value-bind (nn v)
         (nlet-tail iter ((v 0))
           (declare (fixnum v)) ;; for all practical purposes...
           ;; check successive pairs of LSB bits = mod 4
+          ;; WARNING: Don't feed this routine n = 0
           (if (zerop (ldb (byte 2 v) n))
               (iter (+ 2 v))
             ;; else - termination
@@ -77,13 +80,18 @@
       ;; when nn = (7 mod 8), choose d = 1, and now (nn-1) = (6 mod 8) as sum of 3 squares
       ;;
       (let* ((d      (if (= 7 (mod8 nn)) 1 0))
-             (nn-d   (- nn d))
+             (nn-d   (- nn d)) ;; can never be 0 mod 4
              (sqrt   (if (= 1 (mod4 nn-d))
                          ;; squares can only be (0 mod 4) or (1 mod 4)
                          ;; we already removed all 4^v so can only be (1 mod 4)
                          (isqrt nn-d)
                        0))
-             ;; these exceptions are cases where we cannot find a prime p = 1 mod 4
+             ;;
+             ;; The following decomp are exceptions where we cannot
+             ;; find a prime p = 1 mod 4, nor where there is x,y such
+             ;; that nn-d = x^2 + y^2 discovered during search for
+             ;; prime p.
+             ;;
              ;; where n /= x^2 + p, for n = 1,2 mod 4
              ;; or where n /= x^2 + 2*p, for n = 3 mod 8
              ;; or where n /= x^2 + y^2 for n = 1,2 mod 4
@@ -91,11 +99,12 @@
              ;; The Rabin & Shallit conjecture is that for
              ;; sufficiently large n, an appropriate prime can
              ;; always be found
-             (decomp (cdr (assoc nn-d '((   3 . ( 1  1  1)) ;; 3 mod 8
-                                        ( 214 . ( 3  6 13)) ;; 2 mod 4 = 6 mod 8
-                                        ( 526 . ( 6  7 21)) ;; 2 mod 4 = 6 mod 8
-                                        (1414 . ( 6 17 33)) ;; 2 mod 4 = 6 mod 8
-                                        ) ))))
+             ;;
+             (decomp (assoc nn-d '((   3 . ( 1  1  1)) ;; 3 mod 8
+                                   ( 214 . ( 3  6 13)) ;; 2 mod 4 = 6 mod 8
+                                   ( 526 . ( 6  7 21)) ;; 2 mod 4 = 6 mod 8
+                                   (1414 . ( 6 17 33)) ;; 2 mod 4 = 6 mod 8
+                                   ) )))
         (declare (fixnum d)
                  (integer sqrt nn-d)
                  (list decomp))
@@ -108,18 +117,21 @@
                      (declare (cons ans))
                      (assert (= n (reduce '+
                                           (mapcar '* ans ans))))
-                     (return-from #1# ans))))
+                     ans)))
           
           (cond ((= nn-d (* sqrt sqrt)) ;; already a square?
                  (answer sqrt 0 0))
                 
                 (decomp
                  ;; special case by table lookup
-                 (apply #'answer decomp))
+                 (apply #'answer (cdr decomp)))
                 
                 ((= 3 (mod8 nn-d)) ;; nn-d = (3 mod 8)
-                 ;; find odd x s.t. prime p = (nn-d - x^2)/2
-                 ;; for odd x, (nn-d - x^2) is always even
+                 ;;
+                 ;; Find odd x s.t. prime p = (nn-d - x^2)/2.
+                 ;; For odd x, (nn-d - x^2) is always even.
+                 ;; Prime p = 1 mod 4.
+                 ;;
                  (multiple-value-bind (x p) (find-prime-nx/2 nn-d)
                    (declare (integer x p))
                    (multiple-value-bind (y z) (decompose-prime p)
@@ -127,15 +139,21 @@
                      (answer x (+ y z) (abs (- y z))))))
                 
                 (t
-                 ;; nn-d is 1,2,5,6 mod 8 = 1,2 mod 4
-                 ;; can't be 0,4 mod 8 since we removed common factors of 4
-                 ;; can't be 7 mod 8 since we removed that case in the LET above to form nn-d
-                 ;; can't be 3 mod 8 since we took care of that in the previous COND clause
+                 ;; nn-d is 1,2,5,6 mod 8 = 1,2 mod 4.
                  ;;
-                 ;; for nn-d = 1 mod 4, it could be a square already
-                 ;; but we took care of that in a previous COND
-                 ;; clause
-                 ;; 
+                 ;; Can't be 0,4 mod 8 since we removed common factors
+                 ;; of 4.
+                 ;;
+                 ;; Can't be 7 mod 8 since we removed that case in the
+                 ;; LET above to form nn-d.
+                 ;;
+                 ;; Can't be 3 mod 8 since we took care of that in the
+                 ;; previous COND clause.
+                 ;;
+                 ;; For nn-d = 1 mod 4 = 1,5 mod 8, it could be a
+                 ;; square already but we took care of that in a
+                 ;; previous COND clause.
+                 ;;
                  (multiple-value-bind (x p is-prime) (find-prime-nx nn-d)
                    (declare (integer x p))
                    (cond (is-prime
@@ -261,11 +279,21 @@
         p
       (iter (+ p 2)))))
 
+;; ----------------------------------------------------------------------------
+#|
+(defvar *big-p* 0)
+
+(lw:defadvice (is-prime? :look-for-largest-prime :before) (p)
+  (setf *big-p* (max *big-p* p)))
+
+(lw:remove-advice 'is-prime? :look-for-largest-prime)
+|#
+
 ;; -----------------------------------------------------------------------------
 #|
  ;; testing...
  
-(time (loop repeat 1000000 do (decompose-integer 512)))      ;;  2.4 sec/M
+(time (loop repeat 1000000 do (decompose-integer 512)))      ;;  2.5 sec/M
 
 (time (loop for ix from 0 to 1000000 do (decompose-integer ix))) ;; 11.6 sec/M
  |#
@@ -323,25 +351,27 @@ Only Bob knows amount paid, only Bob and Alice know cost of item.
   ;;
   ;; only exceptions are '(214 526 1414) tested to n = 1,000,000 => n2 = 4,000,002
   (let (ans)
-    (loop for ix from 0 to n do
-          (let ((n1 (1+ (* 4 ix))))
-            (multiple-value-bind (x p is-prime) (find-prime-nx n1)
-              (unless x
-                (push n1 ans))))
-          (let ((n2 (+ 2 (* 4 ix))))
-            (multiple-value-bind (x p is-prime) (find-prime-nx n2)
-              (unless x
-                (push n2 ans)))) )
+    (loop for ix from 0 to n
+          for n1 from 1 by 4
+          for n2 from 2 by 4
+          do
+          (multiple-value-bind (x p is-prime) (find-prime-nx n1)
+            (unless x
+              (push n1 ans)))
+          (multiple-value-bind (x p is-prime) (find-prime-nx n2)
+            (unless x
+              (push n2 ans))))
     (nreverse ans)))
 
 (defun tst2 (n)
   ;; for n = 3 mod 8, try to express as n = x^2 + 2*p, for p prime 1 mod 4
   ;; only exception is 3, tested to n = 1,000,000 => n3 = 8,000,003
   (let (ans)
-    (loop for ix from 0 to n do
-          (let ((n3 (+ 3 (* 8 ix))))
-            (multiple-value-bind (x p) (find-prime-nx/2 n3)
-              (unless x
-                (push n3 ans)))))
+    (loop for ix from 0 to n
+          for n3 from 3 by 8
+          do
+          (multiple-value-bind (x p) (find-prime-nx/2 n3)
+            (unless x
+              (push n3 ans))))
     (nreverse ans)))
 |#

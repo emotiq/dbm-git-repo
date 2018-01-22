@@ -27,6 +27,8 @@
   (defstruct 1-slot-envelope
     (ref  nil)))
 
+;; -----------------------------------------------------
+
 (defun rmw (s modify-fn)
   ;;
   ;; s is some structure isomorphic to 1-slot-envelope, i.e., must
@@ -36,9 +38,8 @@
            (function modify-fn))
   (loop for old = (1-slot-envelope-ref s)
         for new = (funcall modify-fn old)
-      until 
-	#+:LISPWORKS (sys:compare-and-swap (1-slot-envelope-ref s) old new)
-	#+:ALLEGRO   (excl:atomic-conditional-setf (1-slot-envelope-ref s) new old)))
+        until 
+	(CAS (1-slot-envelope-ref s) old new)))
 
 #+:LISPWORKS
 (defun exch (s val)
@@ -49,9 +50,9 @@
 (defun exch (s val)
   (declare (1-slot-envelope s))
   (loop for old = (1-slot-envelope-ref s)
-      until
-	(excl:atomic-conditional-setf (1-slot-envelope-ref s) val old)
-      finally
+        until
+	(CAS (1-slot-envelope-ref s) old val)
+        finally
 	(return old)))
 
 ;; --------------------------------------------------------------
@@ -371,59 +372,53 @@
 ;; PRIO-MAILBOX -- Mailbox with priority delivery - safe for sharing
 
 #+:LISPWORKS
-(defstruct (prio-mailbox (:include priq))
-  (sem  (mp:make-semaphore :count 0) :read-only t))
-
-#+:LISPWORKS
-(defmethod mailbox-send ((mbox prio-mailbox) msg &key (prio 0))
-  (with-accessors ((sem  prio-mailbox-sem)) mbox
-  (addq mbox msg :prio prio)
-  (mp:semaphore-release sem)))
-
-#+:LISPWORKS
-(defmethod mailbox-empty-p ((mbox prio-mailbox))
-  (emptyq-p mbox))
-
-#+:LISPWORKS
-(defmethod mailbox-not-empty-p ((mbox prio-mailbox))
-  (not (mailbox-empty-p mbox)))
-
-#+:LISPWORKS
-(defmethod mailbox-read ((mbox prio-mailbox) &optional wait-reason timeout)
-  (with-accessors ((sem  prio-mailbox-sem)) mbox
-    (and (mp:semaphore-acquire sem
-                               :wait-reason wait-reason
-                               :timeout     timeout)
-         (popq mbox))
-    ))
+(progn
+  (defstruct (prio-mailbox (:include priq))
+    (sem  (mp:make-semaphore :count 0) :read-only t))
+  
+  (defmethod mailbox-send ((mbox prio-mailbox) msg &key (prio 0))
+    (with-accessors ((sem  prio-mailbox-sem)) mbox
+      (addq mbox msg :prio prio)
+      (mp:semaphore-release sem)))
+  
+  (defmethod mailbox-empty-p ((mbox prio-mailbox))
+    (emptyq-p mbox))
+  
+  (defmethod mailbox-not-empty-p ((mbox prio-mailbox))
+    (not (mailbox-empty-p mbox)))
+  
+  (defmethod mailbox-read ((mbox prio-mailbox) &optional wait-reason timeout)
+    (with-accessors ((sem  prio-mailbox-sem)) mbox
+      (and (mp:semaphore-acquire sem
+                                 :wait-reason wait-reason
+                                 :timeout     timeout)
+           (popq mbox))
+      )))
 
 ;; ------------------------------------------------------
 
 #+:ALLEGRO
-(defstruct (prio-mailbox (:include priq))
-  (sem  (mp:make-gate nil) :read-only t))
-
-#+:ALLEGRO
-(defmethod mailbox-send ((mbox prio-mailbox) msg &key (prio 0))
-  (with-accessors ((sem  prio-mailbox-sem)) mbox
-    (addq mbox msg :prio prio)
-    (mp:put-semaphore sem)))
-
-#+:ALLEGRO
-(defmethod mailbox-empty-p ((mbox prio-mailbox))
-  (emptyq-p mbox))
-
-#+:ALLEGRO
-(defmethod mailbox-not-empty-p ((mbox prio-mailbox))
-  (not (mailbox-empty-p mbox)))
-
-#+:ALLEGRO
-(defmethod mailbox-read ((mbox prio-mailbox) &optional wait-reason timeout)
-  (with-accessors ((sem  prio-mailbox-sem)) mbox
-    ;; yeah-but-what-about-timeout?
-    ;; ALLEGRO-FIXME
-    (mp:get-semaphore sem)
-    (popq mbox)
-    ))
+(progn
+  (defstruct (prio-mailbox (:include priq))
+    (sem  (mp:make-gate nil) :read-only t))
+  
+  (defmethod mailbox-send ((mbox prio-mailbox) msg &key (prio 0))
+    (with-accessors ((sem  prio-mailbox-sem)) mbox
+      (addq mbox msg :prio prio)
+      (mp:put-semaphore sem)))
+  
+  (defmethod mailbox-empty-p ((mbox prio-mailbox))
+    (emptyq-p mbox))
+  
+  (defmethod mailbox-not-empty-p ((mbox prio-mailbox))
+    (not (mailbox-empty-p mbox)))
+  
+  (defmethod mailbox-read ((mbox prio-mailbox) &optional wait-reason timeout)
+    (with-accessors ((sem  prio-mailbox-sem)) mbox
+      ;; yeah-but-what-about-timeout?
+      ;; ALLEGRO-FIXME
+      (mp:get-semaphore sem)
+      (popq mbox)
+      )))
 
 ;; ------------------------------------------------------

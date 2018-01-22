@@ -201,5 +201,8 @@ A null timeout means wait forever."
 
 (defmacro compare-and-swap (place before after)
   `(excl:atomic-conditional-setf ,place ,after ,before))
-  
+
+(defmacro CAS (place old new)
+  `(compare-and-swap ,place ,old ,new))
+
 

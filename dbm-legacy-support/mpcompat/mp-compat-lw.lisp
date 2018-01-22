@@ -32,3 +32,5 @@
 
 ;; --------------------------------------------------------------------------
 
+(defmacro CAS (place old new)
+  `(sys:compare-and-swap ,place ,old ,new))

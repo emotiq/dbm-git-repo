@@ -26,12 +26,14 @@
                 (:file "rpsx")
                 (:file "btree-clos")
                 (:file "memory-btrees-clos")
-		(:file "protocols")
+		#+:LISPWORKS (:file "protocols")
                 )
   :serial t
   :depends-on   ("useful-macros"
+                 #+:ALLEGRO "bordeaux-threads"
                  "mpcompat"
                  "optima"
+                 "trivia"
                  ))
 
 

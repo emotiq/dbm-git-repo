@@ -119,6 +119,8 @@
 
 (defsetf get-property set-property)
 
+;; --------------------------------------------------------
+
 (defmethod send ((self actor) &rest msg)
   ;; send a message to an Actor and possibly activate it if not
   ;; already running. SMP-safe
@@ -127,7 +129,7 @@
                ;; Mark busy, if not already marked. And if it wasn't
                ;; already marked, place it into the ready queue and be
                ;; sure there are Executives running.
-               (when (sys:compare-and-swap (car (actor-busy self)) nil t)
+               (when (CAS (car (actor-busy self)) nil t)
                  ;; The Ready Queue just contains function closures to
                  ;; be dequeued and executed by the Executives.
                  (mailbox-send *actor-ready-queue* #'run
@@ -136,7 +138,8 @@
                    (ensure-executives))))
              
              (run ()
-               (hcl:unwind-protect-blocking-interrupts-in-cleanups
+               (#+:LISPWORKS hcl:unwind-protect-blocking-interrupts-in-cleanups
+                #+:ALLEGRO   unwind-protect
                    (let ((*current-actor* self))
                      (loop for (msg ok) = (multiple-value-list
                                            (next-message mbox))
@@ -144,7 +147,7 @@
                  ;; <-- a message could have arrived here, but would
                  ;; have failed to enqueue the Actor.  So we double
                  ;; check after clearing the busy mark.
-                 (sys:compare-and-swap (car (actor-busy self)) t nil)
+                 (CAS (car (actor-busy self)) t nil)
                  (when (mailbox-not-empty-p mbox)
                    (add-self-to-ready-queue)))))
       (deposit-message mbox msg)
@@ -232,12 +235,21 @@
                          :timeout-fn  timeout-fn
                          :timer
                          (when timeout-expr
+                           #+:LISPWORKS
                            (let ((timer (mp:make-timer
                                          #'send self
                                          :recv-timeout-{3A95A26E-D84E-11E7-9D93-985AEBDA9C2A}
-                                         this-id)))
+                                         this-id) ))
                              (mp:schedule-timer-relative timer timeout-expr)
-                             timer))
+                             timer)
+                           #+:ALLEGRO
+                           (mp:process-run-function
+                            "RECV Timeout Timer"
+                            (lambda ()
+                              (mp:process-sleep timeout-expr)
+                              (send self
+                                    :recv-timeout-{3A95A26E-D84E-11E7-9D93-985AEBDA9C2A}
+                                    this-id))) )
                          ))))
 
 (defmethod actor-recv-test-message ((self actor) msg)
@@ -246,6 +258,7 @@
          (ans-fn    (funcall (recv-info-selector-fn recv-info) msg)))
     (if ans-fn
         (progn
+          #+:LISPWORKS
           (when-let (timer (recv-info-timer recv-info))
             (mp:unschedule-timer timer))
           (enqueue-replay self recv-info)
@@ -353,8 +366,13 @@
 ;; ------------------------------------------
 ;; Sends directed to mailboxes, functions, etc.
 
+#+:LISPWORKS
 (defmethod send ((mbox mp:mailbox) &rest message)
   (mp:mailbox-send mbox message))
+
+#+:ALLEGRO
+(defmethod send ((mbox mp:queue) &rest message)
+  (mpcompat:mailbox-send mbox message))
 
 (defmethod send ((mbox prio-mailbox) &rest message)
   (mailbox-send mbox message))
@@ -389,6 +407,7 @@
 ;; A mailbox repository...
 ;; ... some things just can't be turned into an Actor service...
 
+#+:LISPWORKS
 (let ((queue (list nil)))
 
   (defun get-mailbox ()
@@ -397,6 +416,19 @@
 
   (defun release-mailbox (mbox)
     (sys:atomic-push mbox (car queue))))
+
+#+:ALLEGRO
+(let ((queue (list nil))
+      (lock  (mpcompat:make-lock)))
+
+  (defun get-mailbox ()
+    (mpcompat:with-lock (lock)
+       (or (pop (car queue))
+           (mpcompat:make-mailbox))))
+
+  (defun release-mailbox (mbox)
+    (mpcompat:with-lock (lock)
+       (push mbox (car queue)))))
   
 (defun do-with-borrowed-mailbox (fn)
   (let ((mbox (get-mailbox)))
@@ -409,6 +441,7 @@
     (lambda (,mbox)
       ,@body)))
 
+#+:LISPWORKS
 (editor:setup-indent "with-borrowed-mailbox" 1)
 
 ;; ----------------------------------------------
@@ -425,7 +458,11 @@
            ;; list. Hence the APPLY in the line above.
            (with-borrowed-mailbox (mbox)
              (apply #'send actor :ask-{061B3878-CD81-11E7-9B0D-985AEBDA9C2A} mbox message)
-             (mp:mailbox-read mbox)))))
+             #+:LISPWORKS
+             (mp:mailbox-read mbox)
+             #+:ALLEGRO
+             (mpcompat:mailbox-read mbox)
+             ))))
 
 ;; ----------------------------------------
 ;; ASK RPC directed to functions etc.
@@ -472,7 +509,7 @@
 (defvar *heartbeat-interval* 1)   ;; how often the watchdog should check for system stall
 (defvar *maximum-age*        3)   ;; how long before watchdog should bark
 (defvar *nbr-execs*               ;; should match the number of CPU Cores
-  #+:MACOSX
+  #+(AND :LISPWORKS :MACOSX)
   (load-time-value
    (with-open-stream (s (sys:open-pipe "sysctl -n hw.logicalcpu"))
      (let ((ans (ignore-errors (parse-integer (read-line s nil nil)))))
@@ -480,8 +517,9 @@
                 ans)
            4)))
    t)
-  #+:WIN32 4)
+  #-(AND :LISPWORKS :MACOSX) 4)
 
+#+:LISPWORKS
 (defun pop-ready-queue ()
   ;; while awaiting a function to perform from the Actor ready queue,
   ;; we indicate our waiting with a process property that can be
@@ -492,8 +530,29 @@
     (setf (mp:process-property 'waiting-for-actor) nil
           *last-heartbeat* (get-universal-time))))
 
+#+:LISPWORKS
 (defun waiting-for-actor-p (proc)
   (mp:process-property 'waiting-for-actor proc))
+
+#+:ALLEGRO
+(defun pop-ready-queue ()
+  ;; while awaiting a function to perform from the Actor ready queue,
+  ;; we indicate our waiting with a process property that can be
+  ;; queried by the system watchdog timer.
+  (let* ((proc  (mpcompat:current-process))
+         (plist (mp:process-property-list proc)))
+    (prog2
+        (setf (getf plist 'waiting-for-actor) t
+              (mp:process-property-list proc) plist)
+        (mailbox-read *actor-ready-queue*)
+      (setf (getf plist 'waiting-for-actor) nil
+            (mp:process-property-list proc) plist
+            *last-heartbeat* (get-universal-time)))))
+
+#+:ALLEGRO
+(defun waiting-for-actor-p (proc)
+  (let ((plist (mp:process-property-list proc)))
+    (getf plist 'waiting-for-actor)))
 
 (defun executive-loop ()
   ;; the main executive loop
@@ -505,7 +564,7 @@
               (:terminate-actor ()
                 :report "Terminate Actor"
                 )))
-    (remove-from-pool (mp:get-current-process))))
+    (remove-from-pool (mpcompat:current-process))))
 
 (defun exec-terminate-actor (actor)
   ;; an interrupt handler - if the actor is ours, we terminate it
@@ -698,6 +757,8 @@
        ,@body)
      (list ,@(mapcar #`(lambda () ,a1) forms)) ))
 
+#+:LISPWORKS
 (editor:setup-indent "with-future"  2)
+#+:LISPWORKS
 (editor:setup-indent "with-futures" 2)
 

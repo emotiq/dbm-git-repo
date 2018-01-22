@@ -38,9 +38,9 @@
 (in-package :rubber-objects)
 
 ;; equiv to #F
-(proclaim '(optimize (speed  3)
-                     (safety 0)
-                     (float  0)))
+(declaim (optimize (speed  3)
+                   (safety 0)
+                   (float  0)))
 
 ;; -----------------------------------------------------------------------------
 

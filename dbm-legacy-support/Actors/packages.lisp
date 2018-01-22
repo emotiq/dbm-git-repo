@@ -8,6 +8,10 @@
 (defpackage #:actors
   (:use #:common-lisp)
   (:nicknames #:ac)
+  (:import-from :mpcompat
+   :make-lock
+   :with-lock
+   :CAS)
   (:import-from #:priq
    #:prio-mailbox
    #:make-prio-mailbox
