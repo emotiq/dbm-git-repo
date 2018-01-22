@@ -288,18 +288,38 @@
   (declare (integer n))
   (check-type n (integer 1))
   (assert (member (mod4 n) '(1 2)))
-  (loop for x of-type integer from (the integer (isqrt n)) downto 1 do
-        (let* ((r    (- n (* x x)))
-               (sqrt (if (member (mod4 r) '(0 1)) ;; can only be perfect square
-                         (isqrt r)                ;; if r = (1 mod 4) or r = (0 mod 4)
-                       0)))
-          (declare (integer r sqrt))
-          (cond ((= r (* sqrt sqrt))
-                 (return-from #1# (values x sqrt nil)))
-                ((and (= 1 (mod4 r)) ;; r = 1 mod 4
-                      (primes:is-prime? r))
-                 (return-from #1# (values x r t)))
-                ))))
+  (let ((m  (mod4 n)))
+    (declare (fixnum m))
+    (cond ((= 1 m)
+           ;; check every x, since r = n - x^2 will always be 0,1 mod 4
+           (loop for x of-type integer from (the integer (isqrt n)) downto 1 do
+                 (let* ((r    (- n (* x x)))
+                        (sqrt (isqrt r)))
+                   (declare (integer r sqrt))
+                   (cond ((= r (* sqrt sqrt))
+                          (return-from #1# (values x sqrt nil)))
+                         ((and (= 1 (mod4 r))
+                               (primes:is-prime? r))
+                          (return-from #1# (values x r t)))
+                         ))))
+          (t ;; (= 2 m)
+             ;; check every other x, since r = n - x^2 would bounce between 1,2 mod 4
+             ;; and we only need 1 mod 4.
+             ;; n can't be perfect square in this case. And we need x odd.
+             (let ((start (isqrt n)))
+               (declare (integer start))
+               (when (evenp start)
+                 (decf start))
+               (loop for x of-type integer from start downto 1 by 2 do
+                     (let* ((r    (- n (* x x))) ;; r always 1 mod 4
+                            (sqrt (isqrt r)))
+                     (declare (integer r sqrt))
+                     (cond ((= r (* sqrt sqrt))
+                            (return-from #1# (values x sqrt nil)))
+                           ((primes:is-prime? r)
+                            (return-from #1# (values x r t)))
+                           )))))
+          )))
             
 (defun #1=find-prime-nx/2 (n)
   ;; for case of n = 3 mod 8
@@ -375,7 +395,7 @@
           (stupid-compute-4-coffs n)))
 
 (time (loop repeat 1000000 do (stupid-compute-4-coffs 512))) ;; 17 sec
-(time (loop repeat 1000000 do (decompose-integer 512)))      ;;  3.3 sec, more than 5x faster
+(time (loop repeat 1000000 do (decompose-integer 512)))      ;;  3.5 sec, more than 4x faster
 (time (loop repeat 1000000 do (decompose-integer-big 512)))  ;;  5.1 sec, more than 3x faster
  |#
 
@@ -426,7 +446,7 @@ Only Bob knows amount paid, only Bob and Alice know cost of item.
   ;; for n = 1,2 mod 4 try to express as n = x^2 + p, for p prime 1 mod 4,
   ;; or for which n = x^2 + p^2
   ;;
-  ;; only exceptions are '(214 526 1414)
+  ;; only exceptions are '(214 526 1414) tested to n = 1,000,000 => n2 = 4,000,002
   (let (ans)
     (loop for ix from 0 to n do
           (let ((n1 (1+ (* 4 ix))))
@@ -441,7 +461,7 @@ Only Bob knows amount paid, only Bob and Alice know cost of item.
 
 (defun tst2 (n)
   ;; for n = 3 mod 8, try to express as n = x^2 + 2*p, for p prime 1 mod 4
-  ;; only exception is 3
+  ;; only exception is 3, tested to n = 1,000,000 => n3 = 8,000,003
   (let (ans)
     (loop for ix from 0 to n do
           (let ((n3 (+ 3 (* 8 ix))))
