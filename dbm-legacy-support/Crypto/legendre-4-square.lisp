@@ -212,24 +212,19 @@
                            ;; we already removed all 4^v so can only be (1 mod 4)
                            (isqrt nn-d)
                          0))
-               (decomp (cdr (assoc nn-d '((   1 . ( 1  0  0)) ;; special cases
-                                          (   2 . ( 1  1  0))
-                                          (   3 . ( 1  1  1))
-                                          (  10 . ( 1  3  0))
-                                          (  34 . ( 3  3  4))
-                                          (  58 . ( 3  7  0))
-                                          (  85 . ( 6  7  0))
-                                          ( 130 . ( 3 11  0))
-                                          ( 214 . ( 3  6 13))
-                                          ( 226 . ( 8  9  9))
-                                          ( 370 . ( 8  9 15))
-                                          ( 526 . ( 6  7 21))
-                                          ( 706 . (15 15 16))
-                                          ( 730 . ( 1 27  0))
-                                          (1414 . ( 6 17 33))
-                                          (1906 . (13 21 36))
-                                          (2986 . (21 32 39))
-                                          (9634 . (56 57 57))) ))))
+               ;; these exceptions are cases where we cannot find a prime p = 1 mod 4
+               ;; where n /= x^2 + p, for n = 1,2 mod 4
+               ;; or where n /= x^2 + 2*p, for n = 3 mod 8
+               ;; or where n /= x^2 + y^2 for n = 1,2 mod 4
+               ;;
+               ;; The Rabin & Shallit conjecture is that for
+               ;; sufficiently large n, an appropriate prime can
+               ;; always be found
+               (decomp (cdr (assoc nn-d '((   3 . ( 1  1  1)) ;; 3 mod 8
+                                          ( 214 . ( 3  6 13)) ;; 2 mod 4 = 6 mod 8
+                                          ( 526 . ( 6  7 21)) ;; 2 mod 4 = 6 mod 8
+                                          (1414 . ( 6 17 33)) ;; 2 mod 4 = 6 mod 8
+                                          ) ))))
           (declare (fixnum d)
                    (integer sqrt nn-d)
                    (list decomp))
@@ -380,7 +375,7 @@
           (stupid-compute-4-coffs n)))
 
 (time (loop repeat 1000000 do (stupid-compute-4-coffs 512))) ;; 17 sec
-(time (loop repeat 1000000 do (decompose-integer 512)))      ;;  4.1 sec, more than 4x faster
+(time (loop repeat 1000000 do (decompose-integer 512)))      ;;  3.3 sec, more than 5x faster
 (time (loop repeat 1000000 do (decompose-integer-big 512)))  ;;  5.1 sec, more than 3x faster
  |#
 
@@ -425,3 +420,33 @@ Only fee and x_i are visible
 Only Bob knows amount paid, only Bob and Alice know cost of item.
 
  |#
+
+#|
+(defun tst (n)
+  ;; for n = 1,2 mod 4 try to express as n = x^2 + p, for p prime 1 mod 4,
+  ;; or for which n = x^2 + p^2
+  ;;
+  ;; only exceptions are '(214 526 1414)
+  (let (ans)
+    (loop for ix from 0 to n do
+          (let ((n1 (1+ (* 4 ix))))
+            (multiple-value-bind (x p is-prime) (find-prime-nx n1)
+              (unless x
+                (push n1 ans))))
+          (let ((n2 (+ 2 (* 4 ix))))
+            (multiple-value-bind (x p is-prime) (find-prime-nx n2)
+              (unless x
+                (push n2 ans)))) )
+    (nreverse ans)))
+
+(defun tst2 (n)
+  ;; for n = 3 mod 8, try to express as n = x^2 + 2*p, for p prime 1 mod 4
+  ;; only exception is 3
+  (let (ans)
+    (loop for ix from 0 to n do
+          (let ((n3 (+ 3 (* 8 ix))))
+            (multiple-value-bind (x p) (find-prime-nx/2 n3)
+              (unless x
+                (push n3 ans)))))
+    (nreverse ans)))
+|#
