@@ -15,6 +15,7 @@
 (defmacro with-repl-fn ((fnsym newfn) &body body)
   `(do-with-repl-fn ',fnsym ,newfn (lambda () ,@body)))
 
+#+:LISPWORKS
 (editor:setup-indent "with-repl-fn" 1)
 
 (defun do-with-lisp-ecc (fn)
@@ -28,6 +29,7 @@
   ;; of ECC math ops
   `(do-with-lisp-ecc (lambda () ,@body)))
 
+#+:LISPWORKS
 (editor:setup-indent "with-lisp-ecc" 1)
 
 ;; ---------------------------------------------------------------------------------

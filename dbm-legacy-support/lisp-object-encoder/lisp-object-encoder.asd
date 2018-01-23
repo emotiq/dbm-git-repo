@@ -15,9 +15,10 @@
   :components  ((:file "managed-buffers")
 		(:file "ubyte-streams")
                 (:file "lisp-object-encoder")
-                (:file "persistent-store")
-		(:file "prevalent-metaclass")
-                (:file "prevalent-objects"))
+                #+:LISPWORKS (:file "persistent-store")
+		#+:LISPWORKS (:file "prevalent-metaclass")
+                #+:LISPWORKS (:file "prevalent-objects")
+                )
 
   :SERIAL T
   :depends-on   ("data-objects"

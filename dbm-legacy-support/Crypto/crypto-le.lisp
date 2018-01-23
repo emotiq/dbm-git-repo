@@ -608,6 +608,7 @@
 (defmacro with-ecc-lib (&body body)
   `(do-with-ecc-lib (lambda () ,@body)))
 
+#+:LISPWORKS
 (editor:setup-indent "with-ecc-lib" 1)
 
 

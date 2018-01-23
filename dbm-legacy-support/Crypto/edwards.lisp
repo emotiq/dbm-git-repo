@@ -546,7 +546,7 @@
 
 (defun get-cached-symbol-data (sym key1 key2 fn-compute)
   (let* ((alst  (get sym key1))
-         (item  (sys:cdr-assoc key2 alst)))
+         (item  (cdr (assoc key2 alst))))
     (or item
         (let ((item (funcall fn-compute)))
           (setf (get sym key1)

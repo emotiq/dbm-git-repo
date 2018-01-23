@@ -10,7 +10,7 @@
                 (:file "utilities")
                 (:file "ctr-hash-drbg")
                 (:file "primes")
-                (:file "crypto-le")
+                #+:LISPWORKS (:file "crypto-le")
                 (:file "kdf")
                 (:file "gf-571")
                 (:file "mod-math")
@@ -18,7 +18,8 @@
                 (:file "ecc-B571")
                 (:file "curve-gen")
                 (:file "crypto-environ")
-                (:file "machine-id"))
+                #+:LISPWORKS (:file "machine-id")
+                )
   :serial       t
   :depends-on   ("ironclad"
                  "useful-macros"

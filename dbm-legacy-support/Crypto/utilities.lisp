@@ -35,17 +35,24 @@
          (or ,cname
              (setf ,cname ,creator)))) ))
 
+#+:LISPWORKS
 (editor:setup-indent "def-cached-var" 1)
 
 ;; -----------------------------------------------------------------------------
 ;; junk PRNG - don't use this for cryptographic strength
 
 (def-cached-var my-random-state
-  (lw:make-mt-random-state t))
+  #+:LISPWORKS
+  (lw:make-mt-random-state t)
+  #+:ALLEGRO
+  (make-random-state t))
 
 (um:defmonitor
     ((my-random (n)
-       (lw:mt-random n (my-random-state)))
+       #+:LISPWORKS
+       (lw:mt-random n (my-random-state))
+       #+:ALLEGRO
+       (random n (my-random-state)))
      ))
 
 ;; -----------------------------------------------------------------------------
@@ -364,6 +371,7 @@
                 x             (ash x -8)))
     ans))
 
+#+:LISPWORKS
 (defun fast-sha2-file (fname)
   (fli:with-dynamic-foreign-objects ()
     (let ((carr (fli:allocate-dynamic-foreign-object
@@ -382,6 +390,7 @@
    (let ((dig (ironclad:make-digest :sha256)))
      (ironclad:digest-file dig fname))))
 
+#+:LISPWORKS
 (defun fast-shad2-file (fname)
   (fli:with-dynamic-foreign-objects ()
     (let ((carr (fli:allocate-dynamic-foreign-object
@@ -436,11 +445,13 @@
 
 ;; -------------------------------------------
 
+#+:LISPWORKS
 (defun sha3-256-file (fname)
   (sha3:sha3-digest-file (or fname
                              (capi:prompt-for-file "Select input file"))
                          :output-bit-length 256))
 
+#+:LISPWORKS
 (defun sha3-file (fname)
   (sha3:sha3-digest-file (or fname
                              (capi:prompt-for-file "Select input file"))
@@ -619,6 +630,7 @@
                      curve)))
      ,@body))
 
+#+:LISPWORKS
 (editor:setup-indent "with-ecc-curve" 1)
 
 ;; -----------------------------------------------------------

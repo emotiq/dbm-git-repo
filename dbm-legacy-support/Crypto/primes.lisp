@@ -10,6 +10,10 @@
 ;; -------------------------------------------
 (in-package #:primes)
 ;; -------------------------------------------
+;; equiv to #F
+(declaim  (OPTIMIZE (SPEED 3) (SAFETY 0) (FLOAT 0))
+          (inline empty singleton create))
+
 ;; -----------------------------------------------------------------------------
 ;;
 
@@ -23,7 +27,12 @@
   ;; generate random integer in [lower, upper)
   (ecc-crypto-b571:basic-random-between lower upper))
 
-(defun nbits-val (n)
+;; -----------------------------------------------------------------------------
+
+(declaim (inline 2^ divides? add-mod sub-mod mult-mod div-mod))
+
+(defun 2^ (n)
+  (declare (fixnum n))
   (ash 1 n))
 
 (defun divides? (n d)
@@ -32,12 +41,15 @@
        (zerop (mod n d))))
 
 (defun add-mod  (a b m)
+  (declare (integer a b m))
   (mod (+ a b) m))
 
 (defun sub-mod  (a b m)
+  (declare (integer a b m))
   (mod (- a b) m))
 
 (defun mult-mod (a b m)
+  (declare (integer a b m))
   (mod (* a b) m))
 
 (defun inv-mod (a n)
@@ -46,7 +58,6 @@
   ;; solve Bezouts identity: a*x + b*y = gcd(a,b)
   ;; for (x, y) => x is the modular multiplicative inverse of a modulo b,
   ;; when a coprime to b.
-  #F
   (declare (integer a n))
   (unless (< a n)
     (error "INV-MOD A not less than Modulus"))
@@ -66,11 +77,11 @@
              ))))
 
 (defun div-mod (n d m)
+  (declare (integer n d m))
   (mult-mod n (inv-mod d m) m))
 
 (defun expt-mod (b n m)
   ;; b^n mod m
-  #F
   (declare (integer b n m))
   (let* ((bb  (if (minusp n)
                   (inv-mod b m)
@@ -112,11 +123,15 @@
   (do ((s   '(3 2)) ;; all other primes are (6*k +/- 1)
        (ix   6 (+ 6 ix)))
       ((>= ix 1000) (nreverse s))
+    (declare (integer ix)
+             (cons s))
     (let ((p (1- ix)))
+      (declare (integer p))
       (unless (member p s
                       :test #'divides?)
       (push p s)))
     (let ((q (1+ ix)))
+      (declare (integer q))
       (unless (member q s
                       :test #'divides?)
         (push q s))) ))
@@ -127,7 +142,8 @@
   ;; return a prime p, k < p < 2*k-2
   ;; By Bertrand's Postulate, there is always at least one prime, p,
   ;; where k < p < 2*k-2, for k > 3
-  (declare (integer k))
+  (declare (integer k)
+           (fixnum mr-iters))
   (cond ((< k 997)
          (let ((ps (reduce (lambda (ps p)
                              (if (< k p (* 2 (1- k)))
@@ -212,7 +228,7 @@
       )))
 
 ;; collect a bunch of primes around 2^32
-(let* ((ps (um:nlet-tail iter ((n (nbits-val 32))
+(let* ((ps (um:nlet-tail iter ((n (2^ 32))
                                (ans nil)
                                (ix 1))
              (if (< ix 16)
@@ -226,11 +242,11 @@
                     (n 1))
   (if (> ix 20)
       (nreverse ans)
-    (if (is-prime? (- (nbits-val 32) n))
+    (if (is-prime? (- (2^ 32) n))
         (iter (1+ ix) (cons n ans) (+ n 2))
       (iter ix ans (+ n 2)))))
 
-(let ((b32 (nbits-val 32)))
+(let ((b32 (2^ 32)))
   (um:nlet-tail iter ((ix 1)
                       (ans nil)
                       (n 1))
@@ -247,7 +263,7 @@
 
 (let* ((cs  '(5 17 65 99 107 135 153 185))
        (ms  (mapcar (lambda (c)
-                      (- (nbits-val 32) c))
+                      (- (2^ 32) c))
                     cs))
        (x  3618502788666131106986593281521497120414687020801267626233049500247285301239)
        (xs (um:nlet-tail iter ((x  x)
@@ -463,6 +479,7 @@
     (declare (integer e r)) ))
 
 (defun perfect-square? (c)
+  (declare (integer c))
   (let ((r (isqrt c)))
     (= c (* r r))))
 
@@ -471,7 +488,7 @@
   ;; even if c really is a perfect square, this can often fail
   (let* ((n   (integer-length c))
          (m   (ceiling n 2))
-         (lim (nbits-val m))
+         (lim (2^ m))
          (ix  0))
     (labels ((guess (&optional x)
                (if x
@@ -491,6 +508,7 @@
         ))))
 |#
 (defun jacobi-symbol (a n)
+  (declare (integer a n))
   (let ((a (mod a n)))
     (cond
      ((or (= 1 a)
@@ -507,6 +525,7 @@
                             (= 7 rem)) 1)
                        ((or (= 3 rem)
                             (= 5 rem)) -1))))
+            (declare (integer rem s))
             (when (and (= 3 (mod n 4))
                        (= 3 (mod a1 4)))
               (setf s (- s)))
@@ -514,6 +533,7 @@
      )))
                  
 (defun probabilistic-lucas-test (c)
+  (declare (integer c))
   (if (or (evenp c)
           (perfect-square? c))
       nil
@@ -524,8 +544,10 @@
                     (cond ((zerop jac) (return-from probabilistic-lucas-test nil))
                           ((= -1 jac)  (return d)))))
            (k  (1+ c)))
-
+      (declare (integer d k))
+      
       (labels ((half-mod (x)
+                 (declare (integer x))
                  (mod (ash (if (oddp x)
                                (+ x c)
                              x)
@@ -535,10 +557,12 @@
         (um:nlet-tail iter ((u  1)
                             (v  1)
                             (ix (- (integer-length k) 2)))
+          (declare (integer u v ix))
           (if (minusp ix)
               (zerop u)
             (let ((utmp (mult-mod u v c))
                   (vtmp (half-mod (+ (* v v) (* d u u)))))
+              (declare (integer utmp vtmp))
               (if (logbitp ix k)
                   (iter (half-mod (+ utmp vtmp))
                         (half-mod (+ vtmp (* d utmp)))
@@ -589,7 +613,8 @@
             always (funcall strong-liar? witness)) )))
 
 (defun deterministic-miller-rabin-prime? (p witnesses)
-  (declare (integer p))
+  (declare (integer p)
+           (list witnesses))
   ;; return NIL if p found to be composite on the basis of the listed witnesses
   ;; assumes p odd > 2
   (let ((strong-liar? (make-strong-miller-rabin-liar-test p)))
@@ -598,7 +623,8 @@
 
 (defun miller-rabin-prime? (p &optional (mr-iters 50))
   ;; assumes p odd > 3
-  (declare (integer p))
+  (declare (integer p)
+           (fixnum mr-iters))
   (cond
    ((< p         1373653) (deterministic-miller-rabin-prime? p '(2 3)))
    ((< p         9080191) (deterministic-miller-rabin-prime? p '(31 73)))
@@ -612,7 +638,8 @@
 
 
 (defun is-prime? (p &optional (mr-iters 50))
-  (declare (integer p))
+  (declare (integer p)
+           (fixnum mr-iters))
   (cond
    ((< p 2)   nil)
    ((< p 4)   t)
@@ -626,13 +653,16 @@
   ;; solve Bezout's identity: a*x + b*y = gcd(a,b)
   ;; for (x, y) => x is the modular multiplicative inverse of a modulo b,
   ;; when a coprime to b.
+  (declare (integer a b))
   (if (zerop (mod a b))
       (values 0 1)
     (multiple-value-bind (x y) (extended-gcd b (mod a b))
+      (declare (integer x y))
       (values y
               (- x (* y (truncate a b)))) )))
 
 (defun compute-modulo-inverse (a m)
+  (declare (integer a m))
   (assert (= 1 (gcd a m))) ;; ensure A coprime with M
   (mod (extended-gcd a m) m))
 
@@ -652,17 +682,23 @@
 ;; (defvar *niter* 0)
 
 (defun test-primitive-root (n factors x)
+  (declare (integer n x)
+           (list factors))
   ;; check to see if x is a primitive root of prime n
   ;; where factors are the prime factors of phi(n) = (n-1)
   (and
    (= 1 (gcd x n))                  ;; - coprime test S.B. true for all X - REDUNDANT
    (= 1 (expt-mod x (1- n) n))      ;; - Fermat's test S.B. true for all X
    (every (lambda (factor) ;; - Lucas' test S.B. true for some X
-            (/= 1 (expt-mod x (truncate (1- n) (first factor)) n)))
+            (declare (cons factor))
+            (/= 1 (expt-mod x (truncate (1- n) (the integer (first factor))) n)))
           factors)
    x)) ;; return the witness as true
   
 (defun lucas-lehmer-test (n factors &optional (limit 20))
+  (declare (integer n)
+           (fixnum limit)
+           (list factors))
   ;; Lucas-Lehmer test for N = prod(factors)+1 as prime,
   ;; for FACTORS a list of prime factors of (N-1).
   ;; If passes test, then N is absolutely prime and we return a witness number.
@@ -676,13 +712,16 @@
   (or ;; (test-primitive-root n factors 2)
       ;; (test-primitive-root n factors 5)
       (um:nlet-tail iter ((limit limit))
+        (declare (fixnum limit))
         (and (plusp limit)                    ;; - true if not exhausted the search
              (let ((x (random-between 2 (1- n))))
+               (declare (integer x))
                ;; no need to look over whole range, since the upper half mirrors the lower half
                (or (test-primitive-root n factors x) ;; - Lucas' test S.B. true for some X
                    (iter (1- limit)))) ))))
 
 (defun provably-prime? (n &optional absolute-proof)
+  (declare (integer n))
   (lucas-lehmer-test n (factors-of (1- n) absolute-proof)))
 
 #|
@@ -733,6 +772,7 @@
 |#
 
 (defun factors-of (n &optional complete-factorization-p)
+  (declare (integer n))
   ;; good for some N -- return a list of conses: ((factor1 . exponent1) (factor2 . exponent2) ...)
   ;;
   ;; It is possible that after partial factoring a residue (> 1) will remain.
@@ -751,12 +791,16 @@
   (um:nlet-tail iter ((n  n)
                       (ps *primes*)
                       (factors nil))
+    (declare (integer n)
+             (list factors ps))
     (if ps
         (let ((p (first ps)))
+          (declare (integer p))
           (if (< n p)
               (nreverse factors)
             (if (divides? n p)
                 (multiple-value-bind (d r) (factor-out n p)
+                  (declare (integer d r))
                   (iter d (rest ps) (cons (cons p r) factors)))
               (iter n (rest ps) factors))))
 
@@ -777,6 +821,7 @@
             (nreverse (cons (cons n 1) factors))))
 
          (t (let ((r (isqrt n)))
+              (declare (integer r))
               (if (and (= n (* r r))
                        (is-prime? r))
                   (nreverse (cons (cons r 2) factors))
@@ -788,6 +833,7 @@
   ;; For primitive roots modulo n, there are phi(phi(n)) of them
   ;; For n prime, P, phi(P) = (P-1), and the primitive roots appear
   ;; more or less uniformly distributed over the interval 1 < x < P.
+  (declare (integer n))
   (reduce (lambda (tot factor)
             (destructuring-bind (p . e) factor
               (* tot (1- p) (expt p (1- e)))))
@@ -865,11 +911,14 @@
   ;;                 If the printout shows: Make Base Prime: Absolute
   ;;                    then we will have a proven prime result.
   ;;                 Otherwise, we will have a probabilistic prime result.
+  (declare (fixnum nbits nlevels))
   (labels ((find-incremental-prime (u)
+             (declare (integer u))
              ;; start with large prime U, and compute 2*k*U+1 until prime
              (let ((incr (* 2 u u)))
-               (loop for p from (1+ incr) by incr
-                     for k from 1
+               (declare (integer incr))
+               (loop for p of-type integer from (1+ incr) by incr
+                     for k of-type integer from 1
                      until (and (is-prime? p)
                                 (provably-prime? p)
                                 (< (1- nbits) (integer-length p)))
@@ -877,9 +926,11 @@
                      finally (return p))))
            
            (base-prime (nbits)
+             (declare (fixnum nbits))
              (format t "~&Make Base Prime: ")
-             (loop for u = (make-prime (let ((b (nbits-val nbits)))
-                                         (random-between b (+ b b))))
+             (loop for u of-type integer = (make-prime (let ((b (2^ nbits)))
+                                                         (declare (integer b))
+                                                         (random-between b (+ b b))))
                    until (handler-case
                              (when (provably-prime? u t)
                                (format t "Absolute") ;; proven prime
@@ -910,9 +961,11 @@
 ;; ----------------------------------------------------------------------------------           
 
 (defun compute-diffie-hellman (nbits)
+  (declare (fixnum nbits))
   (let* ((p       (generate-strong-prime nbits t))
          (factors (factors-of (1- p)))
          (g       (lucas-lehmer-test p factors))) ;; returns a primitive root if successful
+    (declare (integer p))
     (if g ;; if lucas-lehmer failed then try again
         (list :DH-P p :DH-G g)
       (compute-diffie-hellman nbits))))
@@ -920,10 +973,13 @@
 ;; ----------------------------------------------------------------------------------           
 
 (defun compute-rsa-d&e (p q)
+  (declare (integer p q))
   (let ((phi    (* (1- p) (1- q)))
         (thresh (integer-length (* p q)))) ;; threshold for e greater than this for good mixing
-    (loop for d = (make-prime (1+ (max p q)))
-          for e = (inv-mod d phi)
+    (declare (integer phi)
+             (fixnum thresh))
+    (loop for d of-type integer = (make-prime (1+ (max p q)))
+          for e of-type integer = (inv-mod d phi)
           do
           (when (> e thresh)
             (return (values d e)))
@@ -931,15 +987,20 @@
             (return (values e d)) ))))
 
 (defun generate-rsa-base (nbits)
+  (declare (fixnum nbits))
   (let* ((nd1 (- (floor nbits 2) 8))
          (p   (generate-strong-prime nd1))
          (nd2 (+ (ceiling nbits 2) 8))
          (q   (generate-strong-prime nd2)))
+    (declare (integer p q)
+             (fixnum nd1 nd2))
     (multiple-value-bind (d e)
         (compute-rsa-d&e p q)
+      (declare (integer d e))
       ;; perform trial encryptions/decryptions to verify goodness
       (loop repeat 100 do
             (let ((msg (random-between 2 (* p q))))
+              (declare (integer msg))
               (assert (= msg (expt-mod (expt-mod msg e (* p q)) d (* p q))))))
       (list :N-Key (* p q) ;; Public N-Key
             :E-Key e ;; Public E-Key
@@ -984,17 +1045,22 @@
 ;; ----------------------------------------------------------------------------------
 
 (defun generate-safe-prime (nbits)
+  (declare (fixnum nbits))
   ;; a safe prime is of the form (2*U+1) where U is a large prime.
-  (let* ((q  (random-between (nbits-val (- nbits 2)) (nbits-val (- nbits 1))))
-         (q  (+ q (- 5 (mod q 6))))
+  (let* ((q0  (random-between (2^ (- nbits 2)) (2^ (- nbits 1))))
+         (q  (+ q0 (- 5 (mod q0 6))))
          (p  (+ 1 q q)))
+    (declare (integer p q0 q))
     (do  ((q  q  (+ q 6))
           (p  p  (+ p 12)))
         ((and (is-prime? q)
               (is-prime? p)) p)
+        (declare (integer p q))
       )))
 
+#+:LISPWORKS
 (defun par-gen-safe-prime (nbits)
+  (declare (fixnum nbits))
   (rch:select ((rch:execEvt #'generate-safe-prime nbits)
                (rch:execEvt #'generate-safe-prime nbits)
                (rch:execevt #'generate-safe-prime nbits)
@@ -1034,15 +1100,17 @@
 ;; -----------------------------------------------------------------------------------
 
 (defun show-group (n)
+  (declare (integer n))
   (loop for ix from 2 below (1- n) ;; to (truncate (1- n) 2)
         collect
         (loop for k from 1 below n collect (expt-mod ix k n))))
 
 
 (defun show-gens (n)
+  (declare (integer n))
   (let ((factors (factors-of (1- n))))
-    (loop for ix from 2 below (ceiling n 2)
-          for g = (test-primitive-root n factors ix)
+    (loop for ix of-type integer from 2 below (ceiling n 2)
+          for g of-type integer = (test-primitive-root n factors ix)
           when g collect g)))
         
 ;; -----------------------------------------------------------------------------------
@@ -1051,8 +1119,10 @@
   (let* ((v  (coerce v 'vector))
          (nb (length v))
          (n  0))
-    (loop for iy from (* 8 (1- nb)) downto 0 by 8
-          for ix from 0
+    (declare (integer n)
+             (fixnum nb))
+    (loop for iy of-type fixnum from (* 8 (1- nb)) downto 0 by 8
+          for ix of-type fixnum from 0
           do
           (setf (ldb (byte 8 iy) n) (aref v ix)))
     n))
@@ -1061,7 +1131,8 @@
   (declare (integer x))
   (let* ((nb (ceiling (integer-length x) 8))
          (v  (make-array nb :element-type '(unsigned-byte 8))))
-    (declare (fixnum nb))
+    (declare (fixnum nb)
+             (vector v))
     (loop for ix of-type fixnum from (* 8 (1- nb)) downto 0 by 8
           for iy of-type fixnum from 0
           do
@@ -1105,35 +1176,39 @@
 ;; -----------------------------------------------
 
 (defun make-nbit-prime (nbits hash-type)
+  (declare (fixnum nbits))
   (assert (>= (* 8 (ironclad:digest-length hash-type)) nbits))
-  (let* ((lower (nbits-val nbits))
+  (let* ((lower (2^ nbits))
          (upper (+ lower lower))
          (mask  (1- (ash lower -1)))
          (base  (+ mask 2)))
-    (loop for seed = (random-between lower upper)
-          for u = (let ((dig (ironclad:make-digest hash-type)))
-                    (ironclad:update-digest dig (vector-of seed))
-                    (logand (integer-of (ironclad:produce-digest dig)) mask))
-          for q = (- (+ base u) (logand u 1))
+    (loop for seed of-type integer = (random-between lower upper)
+          for u of-type integer = (let ((dig (ironclad:make-digest hash-type)))
+                                    (ironclad:update-digest dig (vector-of seed))
+                                    (logand (integer-of (ironclad:produce-digest dig)) mask))
+          for q of-type integer = (- (+ base u) (logand u 1))
           when (is-prime? q)
           do (return (values q seed))) ))
 
 (defun gen-dsa-primes (nbits lbits hash-type)
+  (declare (fixnum nbits lbits))
   (let* ((hbits (* 8 (ironclad:digest-length hash-type)))
-         (hfact (nbits-val hbits))
+         (hfact (2^ hbits))
          (n     (1- (ceiling lbits hbits)))
          (b     (- lbits 1 (* n hbits)))
-         (bmask (1- (nbits-val b)))
-         (2^lm1 (nbits-val (1- lbits)))
-         (hmask (1- (nbits-val nbits))))
+         (bmask (1- (2^ b)))
+         (2^lm1 (2^ (1- lbits)))
+         (hmask (1- (2^ nbits))))
+    (declare (fixnum hbits n b)
+             (integer hfact bmask 2^lm1 hmask))
     (loop for (q seed) = (multiple-value-list (make-nbit-prime nbits hash-type))
           do
           (format t "~&Q = ~A" q)
-          (loop for counter from 0 below (* 4 lbits)
-                for offset from 1 by (1+ n)
+          (loop for counter of-type fixnum from 0 below (* 4 lbits)
+                for offset of-type fixnum from 1 by (1+ n)
                 for v = (make-array (1+ n))
                 do
-                (loop for j from 0 to n do
+                (loop for j of-type fixnum from 0 to n do
                       (setf (aref v j) (let ((dig (ironclad:make-digest hash-type)))
                                          (ironclad:update-digest dig
                                                                  (vector-of
@@ -1149,6 +1224,7 @@
                        (x (+ w 2^lm1))
                        (c (mod x (* 2 q)))
                        (p (- x (1- c))))
+                  (declare (integer w x c p))
                   (when (and (>= p 2^lm1)
                              (is-prime? p))
                     (return-from gen-dsa-primes (values p q)) ))) )))
@@ -1157,14 +1233,19 @@
 ;; -------------------------------------------------------
 
 (defun make-2kp+1-prime (nbits &optional (mr-iters 50))
+  (declare (fixnum nbits mr-iters))
   ;; a safe prime is of the form (2*k*U+1) where U is a large prime, and k is a small multiplier.
-  (loop for base = (random-between (nbits-val (- nbits 8)) (nbits-val (- nbits 2)))
-        for u = (make-prime base mr-iters)
+  (loop for base of-type integer = (random-between (2^ (- nbits 8)) (2^ (- nbits 2)))
+        for u of-type integer = (make-prime base mr-iters)
         do
         (let ((incr (+ u u)))
+          (declare (integer incr))
           (um:nlet-tail iter ((p  (1+ incr))
                               (ct 1))
+            (declare (integer p)
+                     (fixnum ct))
             (let ((nb (integer-length p)))
+              (declare (fixnum nb))
               (cond ((> ct 100) nil)
                     ((< nb nbits) (iter (+ p incr) (1+ ct)))
                     ((= nb nbits) (if (is-prime? p mr-iters)
@@ -1172,7 +1253,10 @@
                                     (iter (+ p incr) (1+ ct))))
                     (t nil)) )) )) )
 
+#+:LISPWORKS
 (defun par-try (npar timeout fn &rest args)
+  (declare (fixnum npar)
+           (real timeout))
   (let* ((ans nil)
          (evt (rch:wrap-timeout timeout
                                 (rch:wrap
@@ -1190,7 +1274,8 @@
           (iter))
       )))
 
-(defun par-make-2kp+1-prime (nbits &optional (mr-iters 50)) ;
+(defun par-make-2kp+1-prime (nbits &optional (mr-iters 50))
+  (declare (fixnum nbits mr-iters))
   (par-try 4 300 #'make-2kp+1-prime nbits mr-iters))
 
 ;; ------------------------------------------------------------------------
@@ -1294,10 +1379,9 @@
   ;;   if Q = 6*k-1 then P = 12*k-1
   ;;   if Q = 6*k+1 then P = 12*k+3, but that is divisible by 3, and so cannot be.
   ;; Therefore we want to look only for Q = 6*k-1, Q prime, and P = 2*Q+1 prime
-  #F
-  (declare (integer kbits))
-  (let* ((lower (1+ (nbits-val (- kbits 2))))
-         (upper (1- (nbits-val (1- kbits))))
+  (declare (fixnum kbits mr-iters))
+  (let* ((lower (1+ (2^ (- kbits 2))))
+         (upper (1- (2^ (1- kbits))))
          (niter 0)
          (range kbits))
     (declare (integer lower upper)
@@ -1320,7 +1404,7 @@
                            p)))))
 
       (loop for p =
-            (let* ((x  (nbits-val (- kbits 2)))
+            (let* ((x  (2^ (- kbits 2)))
                    (y  (logior x (mt-random x)))
                    (r  (mod (- 5 y) 6))
                    (n  (+ y r)))
@@ -1354,28 +1438,33 @@
 
 ;; -------------------------------------------------------------------
 
+(declaim (inline sqr big-log pdens))
+
 (defun sqr (n)
+  (declare (integer n))
   (* n n))
 
 (defun big-log (n)
   ;; log for BigNums
-  (* (integer-length n) (log 2)))
+  (declare (integer n))
+  (* (integer-length n) #.(log 2)))
 
 (defun pdens (n)
+  (declare (integer n))
   ;; approx local density of primes near N
   ;; from Bertrand's postulate
   (/ (big-log n)))
 
 
+#+:LISPWORKS
 (defun sieve-2q+1 (nbits &optional (mr-iters 50))
   ;; If P = 2*Q+1, for Q prime, and all higher primes are 6*k+/-1, then
   ;;   if Q = 6*k-1 then P = 12*k-1
   ;;   if Q = 6*k+1 then P = 12*k+3, but that is divisible by 3, and so cannot be.
   ;; Therefore we want to look only for Q = 6*k-1, Q prime, and P = 2*Q+1 prime
-  #F
   (declare (fixnum nbits mr-iters))
   (let* ((tbits 18) ;; big enough to search 1.5M candidates
-         (ns    (nbits-val tbits))
+         (ns    (2^ tbits))
          (arr   (make-array ns
                             :element-type    'bit
                             :initial-element 0)))
@@ -1383,8 +1472,8 @@
              ((array bit (*)) arr))
     
     (um:nlet-tail iter ()
-      (let* ((base  (random-between (nbits-val (- nbits 2))
-                                    (nbits-val (- nbits 1))))
+      (let* ((base  (random-between (2^ (- nbits 2))
+                                    (2^ (- nbits 1))))
              (lower (+ base (- 5 (mod base 6)))))
         (declare (integer base lower))
 
@@ -1456,8 +1545,9 @@
     ))
 
 (defun find-primitive-root (n)
+  (declare (integer n))
   (let* ((factors (factors-of (1- n))))
-    (loop for k from 2 do
+    (loop for k of-type integer from 2 do
           (when (test-primitive-root n factors k)
             (return k)))
     ))
@@ -1468,6 +1558,7 @@
 |#
 
 (defun collect-safe-primes (nprimes nbits &optional (mr-iters 50))
+  (declare (fixnum nprimes nbits mr-iters))
   (um:nlet-tail iter ((primes nil))
     (if (>= (length primes) nprimes)
         primes
@@ -1479,6 +1570,7 @@
 (defun decompose (n)
   ;; decompose a number n into a collection of prime factors:
   ;; n = (* factors (1+ (* factors (1+ (* factors ....)))))
+  (declare (integer n))
   (multiple-value-bind (factors residue) 
       (factors-of n)
     (labels ((expt-form (factor)
@@ -1578,7 +1670,7 @@
 |#
 
 (defun chkroot (n r b)
-  (let ((pwr (nbits-val n)))
+  (let ((pwr (2^ n)))
     (and (= 1 (expt-mod r pwr b))
          (um:nlet-tail iter ((pwr pwr))
            (if (> pwr 2)

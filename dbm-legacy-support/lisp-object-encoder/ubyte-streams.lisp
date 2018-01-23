@@ -30,7 +30,15 @@
 
 ;; ------------------------------------------------------
 
-(defclass ubyte-output-stream (stream:fundamental-binary-output-stream 
+#+:LISPWORKS
+(defclass ubyte-output-stream (stream:fundamental-binary-output-stream
+                               ubyte-stream)
+  ((arr  :accessor uos-arr
+         :initarg  :buffer
+         :initform (mgdbuf:make-buffer 1024))))
+
+#+:ALLEGRO
+(defclass ubyte-output-stream (excl:fundamental-binary-output-stream
                                ubyte-stream)
   ((arr  :accessor uos-arr
          :initarg  :buffer
@@ -42,7 +50,13 @@
                      :buffer use-buffer)
     (make-instance 'ubyte-output-stream)))
 
+#+:LISPWORKS
 (defmethod stream:stream-write-byte ((stream ubyte-output-stream) val)
+  (vector-push-extend val (uos-arr stream))
+  val)
+
+#+:ALLEGRO
+(defmethod excl:stream-write-byte ((stream ubyte-output-stream) val)
   (vector-push-extend val (uos-arr stream))
   val)
 
@@ -70,7 +84,17 @@
 
 ;; ------------------------------------------------------
 
+#+:LISPWORKS
 (defclass ubyte-input-stream (stream:fundamental-binary-input-stream 
+                              ubyte-stream)
+  ((arr    :reader   uis-arr    :initarg :arr)
+   (ix     :accessor uis-ix     :initarg :start)
+   (end    :reader   uis-end    :initarg :end)
+   (reader :reader   uis-reader :initarg :reader :initform 'aref)
+   ))
+
+#+:ALLEGRO
+(defclass ubyte-input-stream (excl:fundamental-binary-input-stream 
                               ubyte-stream)
   ((arr    :reader   uis-arr    :initarg :arr)
    (ix     :accessor uis-ix     :initarg :start)
@@ -85,7 +109,23 @@
                  :end    end
                  :reader reader))
 
+#+:LISPWORKS
 (defmethod stream:stream-read-byte ((stream ubyte-input-stream))
+  (with-accessors ((arr    uis-arr)
+                   (ix     uis-ix )
+                   (end    uis-end)
+                   (reader uis-reader)) stream
+    (if (or (and end
+                 (>= ix end))
+            (not (array-in-bounds-p arr ix)))
+        stream ;; return stream on EOF
+      (prog1
+          (funcall reader arr ix)
+        (incf ix))
+      )))
+
+#+:ALLEGRO
+(defmethod excl:stream-read-byte ((stream ubyte-input-stream))
   (with-accessors ((arr    uis-arr)
                    (ix     uis-ix )
                    (end    uis-end)

@@ -27,7 +27,7 @@
 (defstruct ctr-hash-drbg-state
   seed key reseed ctr hash
   get
-  (lock (mp:make-lock)))
+  (lock (mpcompat:make-lock)))
 
 (defun basic-random-key-256 ()
   (convert-int-to-nbytesv (basic-random (ash 1 256)) 32))
@@ -94,7 +94,7 @@
                    (buf    ctr-hash-drbg-state-seed)
                    (get-ix ctr-hash-drbg-state-get)) state
     
-    (mp:with-lock (lock)
+    (mpcompat:with-lock (lock)
       (let* ((buflen (length buf))
              (dst    (make-ub-array nb)))
         
