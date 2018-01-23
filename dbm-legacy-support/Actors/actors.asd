@@ -32,8 +32,8 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
                 (:file "actors")
                 (:file "actors-machines")
                 (:file "actors-startup")
-                (:file "futures")
-                (:file "linda-tuples")
+                #+:LISPWORKS (:file "futures")
+                #+:LISPWORKS (:file "linda-tuples")
                 #|
                 (:file "actors-macros")
                 (:file "actors-globals")

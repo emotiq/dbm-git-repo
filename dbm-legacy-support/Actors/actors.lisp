@@ -807,7 +807,9 @@
          (ansv  (make-array len)))
     (labels ((done (ix ans)
                (setf (aref ansv ix) ans)
-               (when (zerop (sys:atomic-decf (car (the cons count))))
+               (when (zerop (#+:LISPWORKS sys:atomic-decf
+                             #+:ALLEGRO   excl:decf-atomic
+                                          (car (the cons count))))
                  (apply cbfn (coerce ansv 'list)))))
       (loop for fn in fns
             for ix from 0

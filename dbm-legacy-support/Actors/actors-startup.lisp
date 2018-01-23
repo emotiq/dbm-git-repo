@@ -11,7 +11,7 @@
 ;; non-essential service during Actor base startup, so we will make it
 ;; an Actor-based service after all the base code is in place.
 
-(defvar *actor-directory-manager* #'lw:do-nothing)
+(defvar *actor-directory-manager* 'do-nothing)
 
 (defun directory-manager-p ()
   (typep *actor-directory-manager* 'Actor))
@@ -84,7 +84,7 @@
                                   :single-thread t)))
               
               (labels ((clean-up ()
-                         (setf *actor-directory-manager* #'lw:do-nothing)))
+                         (setf *actor-directory-manager* 'do-nothing)))
                 
                 (dlambda
                   (:clear ()
