@@ -30,7 +30,6 @@
                 )
   :serial t
   :depends-on   ("useful-macros"
-                 #+:ALLEGRO "bordeaux-threads"
                  "mpcompat"
                  "optima"
                  "trivia"

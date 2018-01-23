@@ -196,4 +196,9 @@
        (tree  (apply 'make-authenticated-treap items)))
   (inspect tree)
   (view-treap tree))
- |#
+
+(setf x
+  (let* ((items '(:one :two :three :four :five :six :seven))
+	 (tree  (apply 'make-authenticated-treap items)))
+    tree))
+|#
