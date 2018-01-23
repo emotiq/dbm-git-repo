@@ -171,6 +171,3 @@
                  (- len1 len2))))
       (iter 0))))
 
-(defmethod compare ((k1 hash-val) (k2 hash-val))
-  (compare (hash-val-ubvec k1) (hash-val-ubvec k2)))
-

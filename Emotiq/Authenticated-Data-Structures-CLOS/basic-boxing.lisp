@@ -250,3 +250,6 @@
 (defmethod hash= ((h1 hash-val) (h2 hash-val))
   (string-equal (to-string h1) (to-string h2)))
 
+(defmethod compare ((k1 hash-val) (k2 hash-val))
+  (compare (hash-val-ubvec k1) (hash-val-ubvec k2)))
+
