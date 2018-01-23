@@ -417,8 +417,14 @@
     (with-accessors ((sem  prio-mailbox-sem)) mbox
       ;; yeah-but-what-about-timeout?
       ;; ALLEGRO-FIXME
-      (mp:get-semaphore sem)
-      (popq mbox)
+      (if timeout
+          (sys:with-timeout ((max timeout 0.1)
+                               (values nil nil))
+             (mp:get-semaphore sem)
+             (popq mbox))
+        (progn
+          (mp:get-semaphore sem)
+          (popq mbox)))
       )))
 
 ;; ------------------------------------------------------

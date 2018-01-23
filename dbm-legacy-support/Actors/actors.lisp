@@ -557,40 +557,38 @@
 ;; ----------------------------------------------------------------
 ;; Ready Queue
 
+(defconstant +wait-property+ 'waiting-for-actor)
+
 #+:LISPWORKS
 (defun pop-ready-queue ()
   ;; while awaiting a function to perform from the Actor ready queue,
   ;; we indicate our waiting with a process property that can be
   ;; queried by the system watchdog timer.
   (prog2
-      (setf (mp:process-property 'waiting-for-actor) t)
+      (setf (mp:process-property +wait-property+) t)
       (mailbox-read *actor-ready-queue*)
-    (setf (mp:process-property 'waiting-for-actor) nil
+    (setf (mp:process-property +wait-property+) nil
           *last-heartbeat* (get-universal-time))))
 
 #+:LISPWORKS
 (defun waiting-for-actor-p (proc)
-  (mp:process-property 'waiting-for-actor proc))
+  (mp:process-property +wait-property+ proc))
 
 #+:ALLEGRO
 (defun pop-ready-queue ()
   ;; while awaiting a function to perform from the Actor ready queue,
   ;; we indicate our waiting with a process property that can be
   ;; queried by the system watchdog timer.
-  (let* ((proc  (mpcompat:current-process))
-         (plist (mp:process-property-list proc)))
-    (prog2
-        (setf (getf plist 'waiting-for-actor) t
-              (mp:process-property-list proc) plist)
-        (mailbox-read *actor-ready-queue*)
-      (setf (getf plist 'waiting-for-actor) nil
-            (mp:process-property-list proc) plist
-            *last-heartbeat* (get-universal-time)))))
+  (let* ((proc  (mpcompat:current-process)))
+    (setf (getf (mp:process-property-list proc) +wait-property+) t)
+    (let ((ans (mailbox-read *actor-ready-queue*)))
+      (setf (getf (mp:process-property-list proc) +wait-property+) nil
+            *last-heartbeat* (get-universal-time))
+      ans)))
 
 #+:ALLEGRO
 (defun waiting-for-actor-p (proc)
-  (let ((plist (mp:process-property-list proc)))
-    (getf plist 'waiting-for-actor)))
+  (getf (mp:process-property-list proc) +wait-property+))
 
 ;; ------------------------------------------------------------
 ;; Executive Actions
