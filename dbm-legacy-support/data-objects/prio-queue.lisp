@@ -415,8 +415,6 @@
   
   (defmethod mailbox-read ((mbox prio-mailbox) &optional wait-reason timeout)
     (with-accessors ((sem  prio-mailbox-sem)) mbox
-      ;; yeah-but-what-about-timeout?
-      ;; ALLEGRO-FIXME
       (if timeout
           (sys:with-timeout ((max timeout 0.1)
                                (values nil nil))
