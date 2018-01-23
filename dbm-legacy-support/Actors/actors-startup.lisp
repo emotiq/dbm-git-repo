@@ -76,12 +76,22 @@
 (defun install-actor-directory ()
   (setf *actor-directory-manager*
         (make-actor
-            (let ((directory (make-hash-table
-                              :test 'equal
-                              :single-thread t))
-                  (rev-directory (make-hash-table
-                                  :test 'eq
-                                  :single-thread t)))
+            (let ((directory
+                   #+:LISPWORKS
+                   (make-hash-table
+                    :test 'equal
+                    :single-thread t)
+                   #+:ALLEGRO
+                   (make-hash-table
+                    :test 'equal))
+                  (rev-directory
+                   #+:LISPWORKS
+                   (make-hash-table
+                    :test 'eq
+                    :single-thread t)
+                   #+:ALLEGRO
+                   (make-hash-table
+                    :test 'eq)))
               
               (labels ((clean-up ()
                          (setf *actor-directory-manager* 'do-nothing)))

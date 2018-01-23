@@ -629,11 +629,11 @@
           *executive-processes*)
     ))
 
+#+:ALLEGRO
 (defun #1=allegro-check-sufficient-execs ()
   (loop
    (sleep *heartbeat-interval*)
-   (check-sufficient-execs)
-   (unless *heartbeat-timer*
+   (when (check-sufficient-execs)
      (return-from #1#))))
 
 (defmonitor
