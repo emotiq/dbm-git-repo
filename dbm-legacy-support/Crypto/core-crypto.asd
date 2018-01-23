@@ -19,7 +19,7 @@
                 (:file "curve-gen")
                 (:file "crypto-environ")
                 #+:LISPWORKS (:file "machine-id")
-                )
+                (:file "lagrange-4-square"))
   :serial       t
   :depends-on   ("ironclad"
                  "useful-macros"
