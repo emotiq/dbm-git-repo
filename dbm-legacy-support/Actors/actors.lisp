@@ -272,7 +272,7 @@
   ;; destructively read out the timer
   (when info
     ;; might not be any info by now...
-    (mpcompat:with-lock (recv-info-timer-lock info)
+    (mpcompat:with-lock ((recv-info-timer-lock info))
       (when (eq tid (recv-info-id info))
         ;; might be a new timer info block...
         (shiftf (recv-info-timer info) nil)))))
@@ -491,9 +491,6 @@
            ;; list. Hence the APPLY in the line above.
            (with-borrowed-mailbox (mbox)
              (apply #'send actor :ask-{061B3878-CD81-11E7-9B0D-985AEBDA9C2A} mbox message)
-             #+:LISPWORKS
-             (mp:mailbox-read mbox)
-             #+:ALLEGRO
              (mpcompat:mailbox-read mbox)
              ))))
 
@@ -552,6 +549,9 @@
    t)
   #-(AND :LISPWORKS :MACOSX) 4)
 
+;; ----------------------------------------------------------------
+;; Ready Queue
+
 #+:LISPWORKS
 (defun pop-ready-queue ()
   ;; while awaiting a function to perform from the Actor ready queue,
@@ -587,6 +587,9 @@
   (let ((plist (mp:process-property-list proc)))
     (getf plist 'waiting-for-actor)))
 
+;; ------------------------------------------------------------
+;; Executive Actions
+
 (defun executive-loop ()
   ;; the main executive loop
   (unwind-protect
@@ -610,15 +613,28 @@
   (mailbox-empty-p *actor-ready-queue*))
 
 (defun empty-ready-queue ()
-  (let ((old-mb  (sys:atomic-exchange *actor-ready-queue*
-                                      (make-prio-mailbox))))
+  ;; this is a support routine, to be called only from the safe
+  ;; Monitor section. So, only one of us is mutating
+  ;; *ACTOR-READY-QUEUE*, the pointer.
+  (let ((old-mb  (shiftf *actor-ready-queue*
+                         (make-prio-mailbox))))
     ;; nudge any Executives waiting on the queue to move over to the
     ;; new one.
     (mapc (lambda (proc)
             (declare (ignore proc))
-            (mailbox-send old-mb #'lw:do-nothing))
+            (mailbox-send old-mb (lambda (&rest ignored)
+                                   (declare (ignore ignored))
+                                   ;; do nothing...
+                                   )))
           *executive-processes*)
     ))
+
+(defun #1=allegro-check-sufficient-execs ()
+  (loop
+   (sleep *heartbeat-interval*)
+   (check-sufficient-execs)
+   (unless *heartbeat-timer*
+     (return-from #1#))))
 
 (defmonitor
     ;; All under a global lock
@@ -633,9 +649,13 @@
                      (progn
                        (setf age (- (get-universal-time) *last-heartbeat*))
                        (< age *maximum-age*)))
+           #+:LISPWORKS
            (mp:unschedule-timer (shiftf *heartbeat-timer* nil))
+           #+:ALLEGRO
+           (shiftf *heartbeat-timer* nil)
            (mp:process-run-function
-            "Handle Stalling Actors" ()
+            "Handle Stalling Actors"
+            #+:LISPWORKS ()
             (lambda ()
               (restart-case
                   (error "Actor Executives are stalled (blocked waiting or compute bound). ~&Last heartbeat was ~A sec ago."
@@ -661,11 +681,12 @@
      (push-new-executive ()
        (push (mp:process-run-function
               (format nil "Actor Executive ~D" (incf *executive-counter*))
-              '()
+              #+:LISPWORKS '()
               'executive-loop) ;; use of symbol is intentional
              *executive-processes*)
        (start-watchdog-timer))
 
+     #+:LISPWORKS
      (start-watchdog-timer ()
        (unless *heartbeat-timer*
          (setf *heartbeat-timer*
@@ -675,6 +696,13 @@
           *heartbeat-interval*
           *heartbeat-interval*)))
 
+     #+:ALLEGRO
+     (start-watchdog-timer ()
+       (unless *heartbeat-timer*
+         (setf *heartbeat-timer*
+               (mp:process-run-function "Heartbeat Timer"
+                                        'allegro-check-sufficient-execs))))
+
      (ensure-executives ()
        (unless *executive-processes*
          (dotimes (ix *nbr-execs*)
@@ -683,13 +711,19 @@
      (kill-executives ()
        (let ((timer (shiftf *heartbeat-timer* nil)))
          (when timer
+           #+:LISPWORKS
            (mp:unschedule-timer timer)
+           #+:ALLEGRO
+           (mp:process-kill timer)
            (setf *last-heartbeat* 0)))
        (let ((procs (shiftf *executive-processes* nil)))
          (setf *executive-counter* 0)
          (dolist (proc procs)
            (ignore-errors
-             (mp:process-terminate proc)))
+             #+:LISPWORKS
+             (mp:process-terminate proc)
+             #+:ALLEGRO
+             (mp:process-kill proc)))
          (empty-ready-queue)
          ))))
 
