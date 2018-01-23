@@ -24,6 +24,11 @@
 (defvar *actor-ready-queue*   (make-prio-mailbox)) ;; a queue of pending Actor activations
 (defvar *executive-processes* nil)                 ;; the list of Executive threads
 
+(defun do-nothing (&rest args)
+  (declare (ignore args))
+  ;; literally, do nothing...
+  )
+           
 ;; ----------------------------------------------------
 ;; An Actor mailbox contains a regular priority mailbox plus a list of
 ;; previously stashed messages. Stashed messages will be read before
@@ -96,7 +101,7 @@
     ;; the Actor queries this slot so SMP safety not a concern.
     :accessor  actor-user-fn
     :initarg   :fn
-    :initform  #'lw:do-nothing)
+    :initform  'do-nothing)
    ))
 
 ;; -----------------------------------------------------
@@ -622,10 +627,7 @@
     ;; new one.
     (mapc (lambda (proc)
             (declare (ignore proc))
-            (mailbox-send old-mb (lambda (&rest ignored)
-                                   (declare (ignore ignored))
-                                   ;; do nothing...
-                                   )))
+            (mailbox-send old-mb 'do-nothing))
           *executive-processes*)
     ))
 
