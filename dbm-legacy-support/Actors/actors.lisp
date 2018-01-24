@@ -653,17 +653,31 @@
      
      (check-sufficient-execs ()
        (let (age)
-         (unless (or (null *executive-processes*)
-		     (ready-queue-empty-p)
-                     (find-waiting-executive)
-                     (progn
-                       (setf age (- (get-universal-time) *last-heartbeat*))
-                       (< age *maximum-age*)))
+         (unless (or (null *executive-processes*) ;; not running the Actor system?
+		     (ready-queue-empty-p)        ;; nothing to do anyway?
+                     (find-waiting-executive)     ;; an available Executive thread?
+                     (< (setf age (- (get-universal-time) ;; been stalled long enough?
+				     *last-heartbeat*))
+			*maximum-age*))
            ;; -------------------------------------------
-           ;; why kill the workhorse?  We do it because we need to
-           ;; avoid repeat nuisance stall reports while we are busy
-           ;; handling the first one.
-
+           ;;
+           ;; Why kill the workhorse?
+           ;;
+           ;; For LW, the timer routine triggers in an arbitrary
+           ;; thread with a retriggering timer. This routine runs as
+           ;; an interrupt routine and we need to keep it short. We
+           ;; also need to prevent retriggering of nuisance
+           ;; notifications while we are busy handling the situation.
+           ;;
+           ;; For ACL, the timer runs in its own dedicated thread and
+           ;; won't retrigger until we return from here. But we also
+           ;; need to keep this short so that we don't block ongoing
+           ;; useful activity that may need something inside this
+           ;; monitor section.
+           ;;
+           ;; So in both cases, just kill off the timer and let a new
+           ;; thread handle the notification with the user.
+           ;; ----------------------------------------------
 	   #+:LISPWORKS
            (mp:unschedule-timer (shiftf *heartbeat-timer* nil))
 	   #+:ALLEGRO
