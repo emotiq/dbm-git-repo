@@ -148,7 +148,7 @@
                    (let ((*current-actor* self))
                      (loop for (msg ok) = (multiple-value-list
                                            (next-message mbox))
-                           while ok do (apply #'dispatch-message self msg)))
+                           while ok do (apply 'dispatch-message self msg)))
                  ;; <-- a message could have arrived here, but would
                  ;; have failed to enqueue the Actor.  So we double
                  ;; check after clearing the busy mark.
@@ -171,7 +171,7 @@
 (defun self-call (&rest msg)
   ;; send a message to myself, immediate execution. If an Actor didn't
   ;; call this, an error will result.
-  (apply #'dispatch-message (current-actor) msg))
+  (apply 'dispatch-message (current-actor) msg))
 
 ;; ------------------------------------------------
 ;; RECV handling
@@ -339,8 +339,8 @@
                  ;; Intercept queries to send back a response from the
                  ;; following message, reflecting any errors back to
                  ;; the caller.
-                 (send replyTo (apply #'capture-ans-or-exn
-                                #'self-call msg)))
+                 (send replyTo (apply 'capture-ans-or-exn
+                                'self-call msg)))
                      
                 (:continuation-{14AFB5F8-D01F-11E7-A1BE-985AEBDA9C2A} (fn &rest vals)
                  ;; Used for callbacks into the Actor
@@ -370,7 +370,7 @@
       (lambda (&rest args)
         (if (eq self (current-actor))
             (apply contfn args)
-          (apply #'send self :continuation-{14AFB5F8-D01F-11E7-A1BE-985AEBDA9C2A} contfn args)))
+          (apply 'send self :continuation-{14AFB5F8-D01F-11E7-A1BE-985AEBDA9C2A} contfn args)))
     ;; else - not originating from inside of an Actor, just return the
     ;; function unchanged
     contfn))
@@ -420,14 +420,14 @@
 
 (defmethod send ((sym symbol) &rest message)
   (if-let (actor (find-actor sym))
-      (apply #'send actor message)
+      (apply 'send actor message)
     (if (fboundp sym)
         (apply sym message)
       (call-next-method))))
 
 (defmethod send ((str string) &rest message)
   (if-let (actor (find-actor str))
-      (apply #'send actor message)
+      (apply 'send actor message)
     (call-next-method)))
 
 (defun funcallable-p (obj)
@@ -489,13 +489,13 @@
 (defmethod ask ((actor actor) &rest message)
   ;; Blocking synchronous ASK with mailbox
   (if (eq actor (current-actor))
-      (apply #'dispatch-message actor message)
+      (apply 'dispatch-message actor message)
     ;; else - asking someone else
-    (apply #'recover-ans-or-exn
+    (apply 'recover-ans-or-exn
            ;; return through mailbox is via SEND which always produces a
            ;; list. Hence the APPLY in the line above.
            (with-borrowed-mailbox (mbox)
-             (apply #'send actor :ask-{061B3878-CD81-11E7-9B0D-985AEBDA9C2A} mbox message)
+             (apply 'send actor :ask-{061B3878-CD81-11E7-9B0D-985AEBDA9C2A} mbox message)
              (mpcompat:mailbox-read mbox)
              ))))
 
@@ -516,14 +516,14 @@
 
 (defmethod ask ((sym symbol) &rest message)
   (if-let (actor (find-actor sym))
-      (apply #'ask actor message)
+      (apply 'ask actor message)
     (if (fboundp sym)
         (apply sym message)
       (call-next-method))))
 
 (defmethod ask ((str string) &rest message)
   (if-let (actor (find-actor str))
-      (apply #'ask actor message)
+      (apply 'ask actor message)
     (call-next-method)))
 
 ;; ---------------------------------------------
@@ -532,7 +532,7 @@
 
 (defun spawn (fn &rest args)
   (let ((actor (make-actor fn)))
-    (apply #'send actor args)
+    (apply 'send actor args)
     actor))
 
 ;; --------------------------------------------------------------------
@@ -632,27 +632,44 @@
 #+:ALLEGRO
 (defun #1=allegro-check-sufficient-execs ()
   (loop
-   (sleep *heartbeat-interval*)
-   (when (check-sufficient-execs)
-     (return-from #1#))))
+    (sleep *heartbeat-interval*)
+    (when (check-sufficient-execs)
+      (return-from #1#))))
+
+#|
+(defun test-stall ()
+  (loop repeat (1+ *nbr-execs*) do 
+	(spawn (lambda () 
+		 (sleep 10) 
+		 (pr :hello (current-actor)))
+	       )))
+|#
 
 (defmonitor
     ;; All under a global lock
     ((terminate-actor (actor)
        (dolist (exec *executive-processes*)
-         (mp:process-interrupt exec #'exec-terminate-actor actor)))
+         (mp:process-interrupt exec 'exec-terminate-actor actor)))
      
      (check-sufficient-execs ()
        (let (age)
-         (unless (or (ready-queue-empty-p)
+         (unless (or (null *executive-processes*)
+		     (ready-queue-empty-p)
                      (find-waiting-executive)
                      (progn
                        (setf age (- (get-universal-time) *last-heartbeat*))
                        (< age *maximum-age*)))
-           #+:LISPWORKS
+           ;; -------------------------------------------
+           ;; why kill the workhorse?  We do it because we need to
+           ;; avoid repeat nuisance stall reports while we are busy
+           ;; handling the first one.
+
+	   #+:LISPWORKS
            (mp:unschedule-timer (shiftf *heartbeat-timer* nil))
-           #+:ALLEGRO
-           (shiftf *heartbeat-timer* nil)
+	   #+:ALLEGRO
+	   (setf *heartbeat-timer* nil)
+           ;; --------------------------------------------
+	   
            (mp:process-run-function
             "Handle Stalling Actors"
             #+:LISPWORKS ()
@@ -673,7 +690,7 @@
             ))))
 
      (find-waiting-executive ()
-       (some #'waiting-for-actor-p *executive-processes*))
+       (some 'waiting-for-actor-p *executive-processes*))
 
      (remove-from-pool (proc)
        (setf *executive-processes* (delete proc *executive-processes*)))
@@ -682,7 +699,7 @@
        (push (mp:process-run-function
               (format nil "Actor Executive ~D" (incf *executive-counter*))
               #+:LISPWORKS '()
-              'executive-loop) ;; use of symbol is intentional
+              'executive-loop)
              *executive-processes*)
        (start-watchdog-timer))
 
@@ -690,7 +707,7 @@
      (start-watchdog-timer ()
        (unless *heartbeat-timer*
          (setf *heartbeat-timer*
-               (mp:make-timer 'check-sufficient-execs)) ;; use of symbol intentional
+               (mp:make-timer 'check-sufficient-execs))
          (mp:schedule-timer-relative
           *heartbeat-timer*
           *heartbeat-interval*
@@ -784,16 +801,16 @@
 
 (defmethod do-aska ((obj actor) message cbfn)
   (if (eq obj (current-actor))
-      (funcall cbfn (apply #'dispatch-message obj message))
+      (funcall cbfn (apply 'dispatch-message obj message))
     ;; else
-    (apply #'send obj :ask-{061B3878-CD81-11E7-9B0D-985AEBDA9C2A}
+    (apply 'send obj :ask-{061B3878-CD81-11E7-9B0D-985AEBDA9C2A}
            (=cont (lambda (ans)
-                    (funcall cbfn (apply #'recover-ans-or-exn ans))))
+                    (funcall cbfn (apply 'recover-ans-or-exn ans))))
            message)))
 
 (defmethod do-aska (obj message cbfn)
   (with-future (ans)
-      (apply #'ask obj message)
+      (apply 'ask obj message)
     (funcall cbfn ans)))
   
 ;; ------------------------------------------------

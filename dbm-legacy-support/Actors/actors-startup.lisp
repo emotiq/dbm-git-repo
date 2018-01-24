@@ -172,6 +172,9 @@
   (install-actor-directory)
   (install-actor-printer))
 
+#+:ALLEGRO
+(install-actor-system)
+
 #||#
 #+:LISPWORKS
 (let ((lw:*handle-existing-action-in-action-list* '(:silent :skip)))

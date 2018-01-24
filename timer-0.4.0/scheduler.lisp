@@ -171,6 +171,10 @@
              (process-control-message message)))
        (sb-ext:timeout () nil)))))
 
+#+:ALLEGRO
+(define-condition timer-timeout (error)
+  ())
+
 #+:ALLEGRO ;; NYI
 (defmacro with-optional-timeout (delay &body body)
   (let ((d (gensym)))
