@@ -10,13 +10,14 @@
 (defun create-blinder (m)
   (* m (random-between #.(ash 1 31) #.(ash 1 32))))
 
-(defun get-blinder (m)
-  (or ;; 0 ;; no blinding...
-      (gethash m *blinders*)
-      (setf (gethash m *blinders*) (create-blinder m))))
+(um:defmonitor
+    ((get-blinder (m)
+		  (or ;; 0 ;; no blinding...
+		   (gethash m *blinders*)
+		   (setf (gethash m *blinders*) (create-blinder m))))
 
-(defun reset-blinders ()
-  (clrhash *blinders*))
+     (reset-blinders ()
+		     (clrhash *blinders*))))
 
 ;; -----------------------------------------------------
 ;; Prime-Field Arithmetic
