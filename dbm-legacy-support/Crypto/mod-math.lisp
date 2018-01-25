@@ -2,13 +2,13 @@
 ;; DM/Acudora 11/11
 ;; -----------------------------------------------------
 
-(in-package :ecc-crypto-b571)
+(in-package :crypto-mod-math)
 
 ;; -----------------------------------------------------
 (defvar *blinders* (make-hash-table))
 
 (defun create-blinder (m)
-  (* m (random-between #.(ash 1 31) #.(ash 1 32))))
+  (* m (ecc-crypto-b571:random-between #.(ash 1 31) #.(ash 1 32))))
 
 (um:defmonitor
     ((get-blinder (m)

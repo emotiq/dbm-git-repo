@@ -458,11 +458,18 @@
                          :output-bit-length 512))
 
 (defun sha3-buffers (&rest bufs)
+  (let ((dig (ironclad:make-digest :sha3)))
+    (dolist (buf bufs)
+      (ironclad:update-digest dig (ensure-8bitv buf)))
+    (ironclad:produce-digest dig)))
+
+#|
+(defun sha3-buffers (&rest bufs)
   (let ((dig (sha3:sha3-init :output-bit-length 512)))
     (dolist (buf bufs)
       (sha3:sha3-update dig (ensure-8bitv buf)))
     (sha3:sha3-final dig)))
-                         
+|#                         
 #|
   ;; Needs to load the reference implementation with test code from
   ;; keccak-reference.lisp

@@ -2,7 +2,7 @@
 ;; DM/RAL 07/15
 ;; -----------------------------------------------------------------------
 
-(in-package :ecc-crypto-b571)
+(in-package :edwards-ecc)
 
 ;; Curve1174:  x^2 + y^2 = 1 + d*x^2*y^2
 ;; curve has order 4 * *ed-r* for field arithmetic over prime field *ed-q*
@@ -20,7 +20,7 @@
 (defvar *edcurve*)
 
 (defmacro with-ed-curve (curve &body body)
-  `(let ((*edcurve* ,curve))
+  `(let ((*edcurve* (select-curve ,curve)))
      ,@body))
 
 (define-symbol-macro *ed-c*   (ed-curve-c   *edcurve*))
@@ -110,6 +110,20 @@
           :x  1571054894184995387535939749894317568645297350402905821437625181152304994381188529632591196067604100772673927915114267193389905003276673749012051148356041324
           :y  12)
    ))
+
+(defmethod select-curve ((curve ed-curve))
+  curve)
+
+(defmethod select-curve ((curve symbol))
+  (ecase curve
+    (:curve-1174  *curve1174*)
+    (:curve-E382  *curve-E382*)
+    (:curve-41417 *curve41417*)
+    (:curve-E521  *curve-E521*)
+    ))
+
+(defun ed-curves ()
+  (list :curve-1174 :curve-E382 :curve-41417 :curve-E521))
 
 ;; ----------------------------------------------------------------
 
@@ -410,6 +424,9 @@
 (defun ed-div (pt n)
   (ed-mul pt (ed/ n)))
 
+(defun ed-nth-pt (n)
+  (ed-affine (ed-mul *ed-gen* n)))
+
 (defun ed-compress-pt (pt)
   ;; Bernstein suggests encoding as X:SGN(Y)... but what is the "sign"
   ;; of a field number?
@@ -453,9 +470,14 @@
              (vy  (convert-int-to-nbytesv y nb)))
     (sha3-buffers vx vy)))
 
+(defun ed-random-pair ()
+  (let* ((r  (random-between 1 *ed-r*))
+         (pt (ed-nth-pt r)))
+    (values r pt)))
+
 (defun ed-random-generator ()
   ;; every point on the curve is a generator
-  (ed-affine (ed-mul *ed-gen* (random-between 1 *ed-r*))))
+  (ed-nth-pt (random-between 1 *ed-r*)))
     
 #|
 (let* ((*edcurve* *curve41417*)

@@ -3,18 +3,6 @@
 ;; DM/RAL  01/18
 ;; --------------------------------------------------------------------------------
 
-(defpackage :lagrange-4-square
-  (:use :common-lisp)
-  (:import-from :primes
-   :is-prime?
-   :expt-mod)
-  (:import-from :useful-macros
-   :curry
-   :nlet-tail)
-  (:export
-   :decompose-integer
-   ))
-   
 (in-package :lagrange-4-square)
 
 ;; equiv to #F
