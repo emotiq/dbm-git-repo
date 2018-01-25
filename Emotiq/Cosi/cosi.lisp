@@ -14,6 +14,7 @@
 		:ed-nth-pt
 		:*ed-r*
 		:*ed-q*
+		:ed-neutral-point
                 :ed-pt=
 		:with-ed-curve
 		:ed-compress-pt
@@ -263,7 +264,7 @@
   ;; the collective challenge c.
   ;;
   (with-curve curve
-    (let* ((pzero (ed-nth-pt 0))
+    (let* ((pzero (ed-neutral-point))
            (tkey  (reduce 'ed-add (mapcar 'ed-decompress-pt pkeys)
                           :initial-value pzero))
            (tcomm (reduce 'ed-add (mapcar 'ed-nth-pt commits)
