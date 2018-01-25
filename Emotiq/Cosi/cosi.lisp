@@ -14,7 +14,7 @@
 		:ed-nth-pt
 		:*ed-r*
 		:*ed-q*
-		:ed-neutral-point
+                :ed-neutral-point
                 :ed-pt=
 		:with-ed-curve
 		:ed-compress-pt
@@ -291,7 +291,7 @@
 (progn
   (setf *s-keys* nil
         *p-keys* nil)
-  (loop repeat 100 do
+  (loop repeat 1000 do
         (multiple-value-bind (s p) (ed-random-pair)
           (push s *s-keys*)
           (push (ed-compress-pt p) *p-keys*))))
@@ -330,7 +330,7 @@
           (verify-schnorr-signature tkey msg tsig)
           (list msg tsig))))))
 
-(time (loop repeat 10 do (tst)))
+(time (loop repeat 1 do (tst)))
   
  |#
 
