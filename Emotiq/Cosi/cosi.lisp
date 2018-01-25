@@ -30,15 +30,45 @@
    :verify-schnorr-signature
    ))
 
+;; -------------------------------------------------------
+
 (in-package :cosi)
 
-(defun hash-pt-msg (pt msg)
+;; ------------------------------------------------------- 
+;; EC points are transported (stored in memory, sent over networks) as
+;; compressed points, a single integer, not as pairs of integers.
+
+(defun hash-pt-msg (pt msg) 
+  ;; We hash an ECC point by first converting to compressed form, then
+  ;; to a UB8 vector. A message is converted to a UB8 vector by calling
+  ;; on LOENC:ENCODE.
+  ;;
+  ;; Max compressed point size is 1 bit more than the integer-length
+  ;; of the underlying curve field prime modulus.
+  ;;
+  ;; We return the SHA3 hash as a big-integer
+  ;;
   (let* ((nb (ceiling (1+ (integer-length *ed-q*)) 8))
 	 (v  (convert-int-to-nbytesv (ed-compress-pt pt) nb))
 	 (mv (loenc:encode msg)))
     (convert-bytes-to-int (sha3-buffers v mv))))
 
 (defun schnorr-signature (skey msg &key (curve :curve-1174))
+  ;; 
+  ;; The Schnorr signature is computed over ECC in a manner analogous
+  ;; to prime fields. (In fact we have to use the prime field of the
+  ;; curve here.)
+  ;;
+  ;; Compute a random value v and its curve V = v*G, for EC generator
+  ;; G (a point on the curve).  In the prime field of the curve
+  ;; itself, (not in the underlying prime field on which the curve is
+  ;; computed), we compute r = (v - c*k_s), for secret key k_s, (an integer).
+  ;;
+  ;; Form the SHA3 hash of the point V concatenated with the message
+  ;; msg: c = H(V|msg).
+  ;; 
+  ;; The Schnorr signature is the integer pair (c r).
+  ;;
   (with-ed-curve curve
     (multiple-value-bind (v vpt) (ed-random-pair)
     (let* ((c   (hash-pt-msg vpt msg))
@@ -47,6 +77,22 @@
 	(list c r)))))
 
 (defun verify-schnorr-signature (pkey msg sig-pair &key (curve :curve-1174))
+  ;;
+  ;; To verify a Schnorr signature (c r), a pair of integers, we take
+  ;; the provider's public key K_p (an EC point in compressed form)
+  ;; and multiply by c and add r*G to derive EC point V' = r*G + c*K_p.
+  ;;
+  ;; We necessarily have K_p = k_s*G. 
+  ;; So V' = r*G + c*k_s*G = (v - c*k_s)*G + c*k_s*G = v*G = V
+  ;;
+  ;; Then compute the SHA3 hash of the point V' and the message msg: H(V'|msg).
+  ;; If that computed hash = c, then the signature is verified.
+  ;;
+  ;; Only the caller knows the secret key, k_s, needed to form the value of r.
+  ;; 
+  ;; The math here is done over the EC using point addition and scalar
+  ;; multiplication.
+  ;;
   (with-ed-curve curve
     (destructuring-bind (c r) sig-pair
       (let ((vpt (ed-add
@@ -55,6 +101,7 @@
 	(assert (= c (hash-pt-msg vpt msg)))
 	))))
 
+;; ---------------------------------------------------------
 #|
 (defvar *skey*) ;; my secret key
 (defvar *pkey*) ;; my public key (a compressed ECC point)
