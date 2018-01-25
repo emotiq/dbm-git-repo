@@ -48,10 +48,17 @@
   ;;
   ;; We return the SHA3 hash as a big-integer
   ;;
+  ;; This is callled with the *ed-curve* binding in effect. Client
+  ;; functions should call this function from within a WITH-ED-CURVE.
+  ;;
   (let* ((nb (ceiling (1+ (integer-length *ed-q*)) 8))
 	 (v  (convert-int-to-nbytesv (ed-compress-pt pt) nb))
 	 (mv (loenc:encode msg)))
     (convert-bytes-to-int (sha3-buffers v mv))))
+
+;; ---------------------------------------------------------
+;; Single message Schnorr Signatures.
+;; Signatures of this type will make up the collective signature.
 
 (defun schnorr-signature (skey msg &key (curve :curve-1174))
   ;; 
@@ -121,3 +128,46 @@
 
        
 |#
+
+;; ------------------------------------------------------------
+;; Collective Schnorr Signature
+
+(defun collective-commitment (pkeys commits msg &key (curve :curve-1174))
+  ;; Given a list of public keys, pkeys, and a list of corresponding
+  ;; commitments, commits, form a collective public key, a collective
+  ;; commitment, and the collective challenge.
+  ;;
+  ;; Individual commitments are compressed EC points. Pkeys is also a
+  ;; list of compressed EC points.
+  ;;
+  ;; K_p' = Sum(K_p,i)
+  ;; V'   = Sum(V_i)
+  ;; c    = Hash(V'|msg)
+  ;;
+  ;; where Sum is EC point addition.
+  ;;
+  (with-ed-curve curve
+    (let* ((pzero (ec-nth-pt 0))
+           (tkey  (reduce 'ed-add pkeys
+                          :initial-value pzero))
+           (tcomm (reduce 'ed-add commits
+                          :initial-value pzero))
+           (c     (hash-pt-msg tcomm msg)))
+      (values tkey tcomm c))))
+
+(defun collective-signature (c sigs &key (curve :curve-1174))
+  ;;
+  ;; For collective challenge, c, signed by each participant with sigs,
+  ;; form the final collective signature, a pair (c rt).
+  ;;
+  (with-ed-curve curve
+    (let ((rt  (ec-nth-pt 0)))
+      (dolist (sig sigs)
+        (destructuring-bind (c_i r_i) sig
+          (assert (= c_i c)) ;; be sure we are using the same challenge val
+          (setf rt (ec-add rt r_i))))
+      (values c rt))))
+
+(defun 
+
+
