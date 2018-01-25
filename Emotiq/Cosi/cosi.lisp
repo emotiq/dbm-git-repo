@@ -93,16 +93,52 @@
 ;; In the following:
 ;;
 ;;  v,V = v*G = a commitment value
-;;  c = a challenge value
-;;  r = a cloaked signature value
+;;  c = a challenge value, typically c = Hash(V|m),
+;;       for message m. This is the Fiat-Shamir challenge.
+;;  r = a cloaked signature value = (v - c*k_s) mod r_ec,
+;;       for private key k_s, prime modulus r_ec = #|K/h|,
+;;       #|K/h| = (the prime order of the curve field),
+;;       #|K| = prime order of field in which curve is embedded,
+;;       h = cofactor of curve field. r_ec*G = I, the point at infinity.
+;;       Points on the EC are computed over prime field q_ec, not r_ec.
+;;  sig = a pair = (c r)
+;;
+;;  Verfied as V' = r*G + c*K_p, c ?= Hash(V'|m),
+;;  for public key K_p, message m.
 ;;
 ;; When offered a challenge, we compute a commitment, and form the
 ;; signature from them. The signature caries both a cloaked signature
 ;; value and the challenge.  Verifiers should be able to use those two
 ;; values, in combination with our known public key, to verify the
 ;; signature.
+;;
+;; NOTE: We must offer a cloaked signature using value r from the
+;; isomorphic prime field underlying the EC. If, instead, we were to
+;; offer up points along the curve, as in:
+;;    sig' = (c R), for R = V - c*K_p,
+;; for public key K_p, then anyone could forge a signature knowing
+;; only the public key K_p. We gain security through ECDLP and difficulty
+;; of inverting the hash.
+;;
+;; Barriers to attack:
+;;    1. get V from c = H(V|m), very difficult for good hash H.
+;;    2. knowing V = v*G from inverse hash (!?), ECDLP to find v,
+;;       very difficult.
+;;    3. knowing (c, r) from sig, v = r + c*k_s can't be solved for v
+;;       without knowing k_s secret key. Could be anywhere along a line.
+;;       And since prime field is large >2^252, Birthday attack requires
+;;       almost >2^128 trials.
+;;
+;; In distributed cosign the secret v value is communicated to other
+;; cosigners. We need to ensure that it is transported securely.
+;;
+;; Since c = Hash(V|m) this signature also authenticates the message
+;; m.  Value c serves as challenge and message authentication. Value r
+;; in signature serves as undeniable signature of sender (assuming
+;; he/she keeps k_s a secret).
 
 (defun schnorr-commitment (msg)
+  ;; Returns secret commitment seed v. Transport it securely.
   (if msg
       (multiple-value-bind (v vpt) (ed-random-pair)
         (values v (hash-pt-msg vpt msg)))
@@ -130,6 +166,9 @@
   (with-curve curve
     ;; if we were provided with a commitment seed, use it. Otherwise,
     ;; generate one, as we are part of a collective signature effort.
+    ;;
+    ;; Returns secret commitment seed v as second value. Transport it
+    ;; securely. Signature pair (c r) is okay to publish.
     (let* ((vv  (or v
                     (ed-random-pair))) ;; make one up
            (r   (sub-mod *ed-r* vv
