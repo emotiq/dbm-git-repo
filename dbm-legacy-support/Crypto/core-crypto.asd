@@ -25,6 +25,5 @@
                  "useful-macros"
                  "lisp-object-encoder"
                  "s-base64"
-                 "sha3"
                  ))
 

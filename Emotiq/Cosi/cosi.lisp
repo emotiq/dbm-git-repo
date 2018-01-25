@@ -23,8 +23,7 @@
 		:ed-random-pair)
   (:import-from :ecc-crypto-b571
 		:convert-int-to-nbytesv
-		:convert-bytes-to-int
-		:sha3-buffers)
+		:convert-bytes-to-int)
   (:export
    :schnorr-signature
    :verify-schnorr-signature
@@ -38,6 +37,37 @@
 ;; EC points are transported (stored in memory, sent over networks) as
 ;; compressed points, a single integer, not as pairs of integers.
 
+(defvar *default-curve* :curve-1174)
+
+(defun do-with-curve (curve fn)
+  (if curve
+      (with-ed-curve curve
+        (funcall fn))
+    (funcall fn)))
+
+(defmacro with-curve (curve &body body)
+  `(do-with-curve ,curve (lambda () ,@body)))
+
+#+:LISPWORKS
+(editor:setup-indent "with-curve" 1)
+
+;; --------------------------------------------
+;; Hashing with SHA3
+
+(defun select-sha3-hash ()
+  (let ((nb  (1+ (integer-length *ed-q*))))
+    (cond ((> nb 384) :sha3)
+          ((> nb 256) :sha3/384)
+          (t          :sha3/256)
+          )))
+
+(defun sha3-buffers (&rest bufs)
+  ;; assumes all buffers are UB8
+  (let ((dig  (ironclad:make-digest (select-sha3-hash))))
+    (dolist (buf bufs)
+      (ironclad:update-digest dig buf))
+    (ironclad:produce-digest dig)))
+           
 (defun hash-pt-msg (pt msg) 
   ;; We hash an ECC point by first converting to compressed form, then
   ;; to a UB8 vector. A message is converted to a UB8 vector by calling
@@ -59,8 +89,55 @@
 ;; ---------------------------------------------------------
 ;; Single message Schnorr Signatures.
 ;; Signatures of this type will make up the collective signature.
+;;
+;; In the following:
+;;
+;;  v,V = v*G = a commitment value
+;;  c = a challenge value
+;;  r = a cloaked signature value
+;;
+;; When offered a challenge, we compute a commitment, and form the
+;; signature from them. The signature caries both a cloaked signature
+;; value and the challenge.  Verifiers should be able to use those two
+;; values, in combination with our known public key, to verify the
+;; signature.
 
-(defun schnorr-signature (skey msg &key (curve :curve-1174))
+(defun schnorr-commitment (msg)
+  (if msg
+      (multiple-value-bind (v vpt) (ed-random-pair)
+        (values v (hash-pt-msg vpt msg)))
+    ;; else
+    (let ((v (ed-random-pair)))
+      v)))
+
+(defun schnorr-signature-from-challenge (c v skey &key curve)
+  ;; 
+  ;; The Schnorr signature is computed over ECC in a manner analogous
+  ;; to prime fields. (In fact we have to use the prime field of the
+  ;; curve here.)
+  ;;
+  ;; Value c is a presented challenge value. Value v is the commitment
+  ;; seed.
+  ;;
+  ;; From the commitment seed, v, and its curve V = v*G, for EC
+  ;; generator G (a point on the curve).  In the prime field of the
+  ;; curve itself, (not in the underlying prime field on which the
+  ;; curve is computed), we compute r = (v - c*k_s), for secret key
+  ;; k_s, (an integer).
+  ;;
+  ;; The Schnorr signature is the integer pair (c r).
+  ;;
+  (with-curve curve
+    ;; if we were provided with a commitment seed, use it. Otherwise,
+    ;; generate one, as we are part of a collective signature effort.
+    (let* ((vv  (or v
+                    (ed-random-pair))) ;; make one up
+           (r   (sub-mod *ed-r* vv
+                        (mult-mod *ed-r* c skey))))
+      (values (list c r) ;; the signature
+              v))))      ;; the commitment seed
+
+(defun schnorr-signature (skey msg &key curve)
   ;; 
   ;; The Schnorr signature is computed over ECC in a manner analogous
   ;; to prime fields. (In fact we have to use the prime field of the
@@ -72,18 +149,17 @@
   ;; computed), we compute r = (v - c*k_s), for secret key k_s, (an integer).
   ;;
   ;; Form the SHA3 hash of the point V concatenated with the message
-  ;; msg: c = H(V|msg).
+  ;; msg: c = H(V|msg). This is the "challenge" value, via Fiat-Shamir.
   ;; 
   ;; The Schnorr signature is the integer pair (c r).
   ;;
-  (with-ed-curve curve
+  (with-curve curve
+    ;; get commitment and its seed
     (multiple-value-bind (v vpt) (ed-random-pair)
-    (let* ((c   (hash-pt-msg vpt msg))
-	   (r   (sub-mod *ed-r* v 
-		       (mult-mod *ed-r* c skey))))
-	(list c r)))))
+      (let ((c  (hash-pt-msg vpt msg))) ;; compute challenge
+        (schnorr-signature-from-challenge c v skey)))))
 
-(defun verify-schnorr-signature (pkey msg sig-pair &key (curve :curve-1174))
+(defun verify-schnorr-signature (pkey msg sig-pair &key curve)
   ;;
   ;; To verify a Schnorr signature (c r), a pair of integers, we take
   ;; the provider's public key K_p (an EC point in compressed form)
@@ -100,7 +176,7 @@
   ;; The math here is done over the EC using point addition and scalar
   ;; multiplication.
   ;;
-  (with-ed-curve curve
+  (with-curve curve
     (destructuring-bind (c r) sig-pair
       (let ((vpt (ed-add
 		  (ed-mul (ed-decompress-pt pkey) c)
@@ -123,16 +199,14 @@
 
 (let* ((msg "this is a test")
        (sig (schnorr-signature *skey* msg)))
-  (verify-schnorr-signature *pkey* msg sig))
-
-
-       
+  (verify-schnorr-signature *pkey* msg sig)
+  (list msg sig))
 |#
 
 ;; ------------------------------------------------------------
 ;; Collective Schnorr Signature
 
-(defun collective-commitment (pkeys commits msg &key (curve :curve-1174))
+(defun collective-commitment (pkeys commits msg &key curve)
   ;; Given a list of public keys, pkeys, and a list of corresponding
   ;; commitments, commits, form a collective public key, a collective
   ;; commitment, and the collective challenge.
@@ -146,28 +220,78 @@
   ;;
   ;; where Sum is EC point addition.
   ;;
-  (with-ed-curve curve
-    (let* ((pzero (ec-nth-pt 0))
-           (tkey  (reduce 'ed-add pkeys
+  ;; Returns the compressed K_p' collective public key, and
+  ;; the collective challenge c.
+  ;;
+  (with-curve curve
+    (let* ((pzero (ed-nth-pt 0))
+           (tkey  (reduce 'ed-add (mapcar 'ed-decompress-pt pkeys)
                           :initial-value pzero))
-           (tcomm (reduce 'ed-add commits
+           (tcomm (reduce 'ed-add (mapcar 'ed-nth-pt commits)
                           :initial-value pzero))
            (c     (hash-pt-msg tcomm msg)))
-      (values tkey tcomm c))))
+      (values (ed-compress-pt tkey) c))))
 
-(defun collective-signature (c sigs &key (curve :curve-1174))
+(defun collective-signature (c sigs &key curve)
   ;;
   ;; For collective challenge, c, signed by each participant with sigs,
   ;; form the final collective signature, a pair (c rt).
   ;;
-  (with-ed-curve curve
-    (let ((rt  (ec-nth-pt 0)))
+  (with-curve curve
+    (let ((rt  0))
       (dolist (sig sigs)
         (destructuring-bind (c_i r_i) sig
           (assert (= c_i c)) ;; be sure we are using the same challenge val
-          (setf rt (ec-add rt r_i))))
-      (values c rt))))
+          (setf rt (add-mod *ed-r* rt r_i))))
+      (list c rt))))
 
-(defun 
+#|
+(defvar *s-keys* nil)
+(defvar *p-keys* nil)
+(progn
+  (setf *s-keys* nil
+        *p-keys* nil)
+  (loop repeat 100 do
+        (multiple-value-bind (s p) (ed-random-pair)
+          (push s *s-keys*)
+          (push (ed-compress-pt p) *p-keys*))))
+
+;; show how this all glues together...
+(let* ((msg  "this is a test")
+       (vs   (mapcar (lambda (p-key)
+                       (declare (ignore p-key))
+                       (schnorr-commitment nil))
+                     *p-keys*)))
+  (multiple-value-bind (tkey c)
+      (collective-commitment *p-keys* vs msg)
+    (let* ((sigs (mapcar (lambda (v s-key)
+                           (schnorr-signature-from-challenge c v s-key))
+                         vs *s-keys*))
+           (tsig (collective-signature c sigs)))
+      (destructuring-bind (cc rt) tsig
+        (assert (= c cc))
+        (verify-schnorr-signature tkey msg tsig)
+        (list msg tsig)))))
+
+(defun tst ()
+  (let* ((msg  "this is a test")
+         (vs   (mapcar (lambda (p-key)
+                         (declare (ignore p-key))
+                         (schnorr-commitment nil))
+                       *p-keys*)))
+    (multiple-value-bind (tkey c)
+        (collective-commitment *p-keys* vs msg)
+      (let* ((sigs (mapcar (lambda (v s-key)
+                             (schnorr-signature-from-challenge c v s-key))
+                           vs *s-keys*))
+             (tsig (collective-signature c sigs)))
+        (destructuring-bind (cc rt) tsig
+          (assert (= c cc))
+          (verify-schnorr-signature tkey msg tsig)
+          (list msg tsig))))))
+
+(time (loop repeat 10 do (tst)))
+  
+ |#
 
 

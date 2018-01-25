@@ -445,17 +445,13 @@
 
 ;; -------------------------------------------
 
-#+:LISPWORKS
-(defun sha3-256-file (fname)
-  (sha3:sha3-digest-file (or fname
-                             (capi:prompt-for-file "Select input file"))
-                         :output-bit-length 256))
+(defun sha3/256-file (fname)
+  (let ((dig (ironclad:make-digest :sha3/256)))
+    (ironclad:digest-file dig fname)))
 
-#+:LISPWORKS
 (defun sha3-file (fname)
-  (sha3:sha3-digest-file (or fname
-                             (capi:prompt-for-file "Select input file"))
-                         :output-bit-length 512))
+  (let ((dig (ironclad:make-digest :sha3)))
+    (ironclad:digest-file dig fname)))
 
 (defun sha3-buffers (&rest bufs)
   (let ((dig (ironclad:make-digest :sha3)))
