@@ -217,14 +217,17 @@
   ;; multiplication.
   ;;
   (with-curve curve
-    (destructuring-bind (c r) sig-pair
-      (let ((vpt (ed-add
-		  (ed-mul (ed-decompress-pt pkey) c)
-		  (ed-nth-pt r))))
-	(assert (= c (hash-pt-msg vpt msg)))
-	))))
+    (let ((kp  (ed-decompress-pt pkey)))
+      (ed-validate-point kp)
+      (destructuring-bind (c r) sig-pair
+        (let ((vpt (ed-add
+                    (ed-mul kp c)
+                    (ed-nth-pt r))))
+          (assert (= c (hash-pt-msg vpt msg)))
+          )))))
 
 ;; ---------------------------------------------------------
+;; tests
 #|
 (defvar *skey*) ;; my secret key
 (defvar *pkey*) ;; my public key (a compressed ECC point)
@@ -265,9 +268,14 @@
   ;;
   (with-curve curve
     (let* ((pzero (ed-neutral-point))
-           (tkey  (reduce 'ed-add (mapcar 'ed-decompress-pt pkeys)
+           (tkey  (reduce (lambda (ans pt)
+                            (ed-add ans (ed-validate-point
+                                         (ed-decompress-pt pt))))
+                          pkeys
                           :initial-value pzero))
-           (tcomm (reduce 'ed-add (mapcar 'ed-nth-pt commits)
+           (tcomm (reduce (lambda (ans v)
+                            (ed-add ans (ed-nth-pt v)))
+                          commits
                           :initial-value pzero))
            (c     (hash-pt-msg tcomm msg)))
       (values (ed-compress-pt tkey) c))))
@@ -285,29 +293,37 @@
           (setf rt (add-mod *ed-r* rt r_i))))
       (list c rt))))
 
+;; ---------------------------------------------------------------------
+;; tests
 #|
 (defvar *s-keys* nil)
 (defvar *p-keys* nil)
 (progn
   (setf *s-keys* nil
         *p-keys* nil)
-  (loop repeat 1000 do
+  (loop repeat 100 do
         (multiple-value-bind (s p) (ed-random-pair)
           (push s *s-keys*)
           (push (ed-compress-pt p) *p-keys*))))
 
 ;; show how this all glues together...
 (let* ((msg  "this is a test")
-       (vs   (mapcar (lambda (p-key)
+       (vs   (time (progn
+               (print "Collect commitments")
+               (mapcar (lambda (p-key)
                        (declare (ignore p-key))
                        (schnorr-commitment nil))
-                     *p-keys*)))
+                     *p-keys*)))))
+  (print "Starting collective commitment")
   (multiple-value-bind (tkey c)
-      (collective-commitment *p-keys* vs msg)
+      (time
+       (collective-commitment *p-keys* vs msg))
+    (print "Starting signature gathering")
     (let* ((sigs (mapcar (lambda (v s-key)
                            (schnorr-signature-from-challenge c v s-key))
                          vs *s-keys*))
            (tsig (collective-signature c sigs)))
+      (print "Verify collective signature")
       (destructuring-bind (cc rt) tsig
         (assert (= c cc))
         (verify-schnorr-signature tkey msg tsig)
