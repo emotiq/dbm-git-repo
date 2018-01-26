@@ -236,6 +236,27 @@
 (editor:setup-indent "with-node-state" 1)
 
 ;; -------------------------------------------------------------
+;; Stand-in for network comms...
+;;
+;; Nodes have a GENSYM ID, and a DLAMBDA handler closure
+;; Each node stores its own private local state
+
+(defstruct cosi-node
+  fn
+  id)
+
+(defvar *cosi-nodes* (make-hash-table))
+
+(defmethod send ((node cosi-node) &rest msg)
+  (apply (cosi-node-fn node) msg))
+
+(defmethod send ((node symbol) &rest msg)
+  (apply 'send (gethash node *cosi-nodes*) msg))
+
+(defun self-call (state &rest msg)
+  (apply (cosi-node-fn (node-state-self state)) msg))
+
+;; -------------------------------------------------------------
 ;; Message handlers
 
 (defun msg-ok (msg byz)
@@ -282,14 +303,14 @@
   ;; We hold that value for the next phase of Cosi.
   ;;
   (with-node-state state
-    (funcall state-self :reset seq-id) ;; starting new round of Cosi
+    (self-call state :reset seq-id) ;; starting new round of Cosi
     (when (msg-ok msg state-byz)
       (multiple-value-bind (v vpt) (ed-random-pair)
         (setf state-v v) ;; hold secret random seed
-        (let ((tparts (list state-self)))
+        (let ((tparts (list (cosi-node-id state-self))))
           (dolist (node state-subs)
             (multiple-value-bind (plst pt)
-                (funcall node :commitment seq-id msg)
+                (send node :commitment seq-id msg)
               (when plst
                 (push node state-parts)
                 (setf tparts (append plst tparts)
@@ -312,7 +333,7 @@
                (eql state-seq seq-id))
       (let ((r  (sub-mod *ed-r* state-v (mult-mod *ed-r* c state-skey))))
         (dolist (node state-parts)
-          (setf r (add-mod *ed-r* r (funcall node :signing seq-id c))))
+          (setf r (add-mod *ed-r* r (send node :signing seq-id c))))
         r))))
 
 (defun node-compute-cosi (state seq-id msg)
@@ -320,9 +341,9 @@
   ;; assume for now that leader cannot be corrupted...
   (with-node-state state
     (multiple-value-bind (tparts vpt)
-        (funcall state-self :commitment seq-id msg)
+        (self-call state :commitment seq-id msg)
       (let* ((c    (hash-pt-msg (ed-decompress-pt vpt) msg)) ;; compute global challenge
-             (r    (funcall state-self :signing seq-id c)))
+             (r    (self-call state :signing seq-id c)))
         (list msg
               (list c    ;; cosi signature
                     r
@@ -351,60 +372,67 @@
   (let ((state (make-node-state byz)))
     (with-node-state state
       (setf state-self
-            (um:dlambda
-
-              ;; -------------------------------------------
-              ;; Cosi entry points
-              
-              (:public-key ()
-               ;; inform the caller of my public key
-               (node-return-pkey+zkp state))
-              
-              (:validate-public-key (triple)
-               (node-validate-public-key state triple))
-              
-              (:reset (seq-id)
-               (node-reset state seq-id))
-
-              (:commitment (seq-id msg)
-               ;; start of new Cosi signature computation
-               (node-make-cosi-commitment state seq-id msg))
-            
-              (:signing (seq-id c)
-               ;; finish of new Cosi signature computation
-               (node-compute-signature state seq-id c))
-
-              (:cosi (seq-id msg)
-               ;; compute a grand Cosi signature
-               (node-compute-cosi state seq-id msg))
-
-              (:validate (msg sig)
-               ;; validate a Cosi signature against a message
-               (node-validate-cosi state msg sig))
-
-              ;; -----------------------------------------
-              ;; for simulation tree construction...
-              
-              (:setup-tree (nodes)
-               (setf state-subs nodes))
-              
-              (:count-nodes ()
-               (1+ (loop for node in state-subs sum
-                         (funcall node :count-nodes))))
-              )))))
+            (make-cosi-node
+             :id (gensym)
+             :fn (um:dlambda
+                   
+                   ;; -------------------------------------------
+                   ;; Cosi entry points
+                   
+                   (:public-key ()
+                    ;; inform the caller of my public key
+                    (node-return-pkey+zkp state))
+                   
+                   (:validate-public-key (triple)
+                    (node-validate-public-key state triple))
+                   
+                   (:reset (seq-id)
+                    (node-reset state seq-id))
+                   
+                   (:commitment (seq-id msg)
+                    ;; start of new Cosi signature computation
+                    (node-make-cosi-commitment state seq-id msg))
+                   
+                   (:signing (seq-id c)
+                    ;; finish of new Cosi signature computation
+                    (node-compute-signature state seq-id c))
+                   
+                   (:cosi (seq-id msg)
+                    ;; compute a grand Cosi signature
+                    (node-compute-cosi state seq-id msg))
+                   
+                   (:validate (msg sig)
+                    ;; validate a Cosi signature against a message
+                    (node-validate-cosi state msg sig))
+                   
+                   ;; -----------------------------------------
+                   ;; for simulation tree construction...
+                   
+                   (:setup-tree (nodes)
+                    (setf state-subs nodes))
+                   
+                   (:count-nodes ()
+                    (1+ (loop for node in state-subs sum
+                              (send node :count-nodes))))
+                   ))))))
 
 #||#
 ;; ----------------------------------------------------------------------------
 ;; Test Code
 
-(defvar *cosi-nodes* nil)
 (defvar *top-node*   nil)
 
 (defun build-cosi-directory ()
   (clrhash *cosi-pkeys*)
-  (dolist (node *cosi-nodes*)
-    (setf (gethash node *cosi-pkeys*)
-          (funcall *top-node* :validate-public-key (funcall node :public-key)))))
+  (maphash (lambda (id node)
+             (setf (gethash id *cosi-pkeys*)
+                   (send *top-node* :validate-public-key (send node :public-key))))
+           *cosi-nodes*))
+
+(defun build-cosi-node-table (nodes)
+  (clrhash *cosi-nodes*)
+  (dolist (node nodes)
+    (setf (gethash (cosi-node-id node) *cosi-nodes*) node)))
 
 (defun build-cosi-tree (&optional (n 900))
   ;; default N = 900 produces a tree with 1000 nodes
@@ -417,28 +445,29 @@
                          (tops  nil))
        (if (endp nodes)
            (if (um:single tops)
-               (setf *cosi-nodes* all
-                     *top-node*   (car tops))
+               (progn
+                 (setf *top-node* (cosi-node-id (car tops)))
+                 (build-cosi-node-table all))
              (progn
               (format t "~%~A Nodes" (length tops))
               (iter tops nil)))
          (let* ((top  (make-node)))
            (push top all)
-           (funcall top :setup-tree (um:take 10 nodes))
+           (send top :setup-tree (mapcar 'cosi-node-id (um:take 10 nodes)))
            (iter (um:drop 10 nodes) (cons top tops)))
          ))))
   (print "Building cosigner public key directory")
   (time (build-cosi-directory)))
 
 #|
-(build-cosi-tree 900)
+(build-cosi-tree 90)
 
-(funcall *top-node* :count-nodes)
+(send *top-node* :count-nodes)
 
 (defvar *x*
-  (time (funcall *top-node* :cosi 1 "this is a test")))
+  (time (send *top-node* :cosi 1 "this is a test")))
 
-(time (funcall *top-node* :validate (car *x*) (cadr *x*)))
+(time (send *top-node* :validate (car *x*) (cadr *x*)))
 
  |#
 ;; ---------------------------------------------------------------
