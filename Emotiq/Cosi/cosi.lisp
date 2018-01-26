@@ -217,14 +217,12 @@
   ;; multiplication.
   ;;
   (with-curve curve
-    (let ((kp  (ed-decompress-pt pkey)))
-      (ed-validate-point kp)
-      (destructuring-bind (c r) sig-pair
-        (let ((vpt (ed-add
-                    (ed-mul kp c)
-                    (ed-nth-pt r))))
-          (assert (= c (hash-pt-msg vpt msg)))
-          )))))
+    (destructuring-bind (c r) sig-pair
+      (let ((vpt (ed-add
+                  (ed-mul (ed-decompress-pt pkey) c)
+                  (ed-nth-pt r))))
+        (assert (= c (hash-pt-msg vpt msg)))
+        ))))
 
 ;; ---------------------------------------------------------
 ;; tests
@@ -269,8 +267,7 @@
   (with-curve curve
     (let* ((pzero (ed-neutral-point))
            (tkey  (reduce (lambda (ans pt)
-                            (ed-add ans (ed-validate-point
-                                         (ed-decompress-pt pt))))
+                            (ed-add ans (ed-decompress-pt pt)))
                           pkeys
                           :initial-value pzero))
            (tcomm (reduce (lambda (ans v)
