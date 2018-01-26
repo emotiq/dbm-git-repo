@@ -477,7 +477,7 @@
 
 (defun ed-random-generator ()
   ;; every point on the curve is a generator
-  (ed-nth-pt (random-between 1 *ed-r*)))
+  (cadr (multiple-value-list (ed-random-pair))))
     
 #|
 (let* ((*edcurve* *curve41417*)
