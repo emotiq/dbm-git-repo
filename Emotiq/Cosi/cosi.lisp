@@ -169,18 +169,13 @@
 
 ;; ---------------------------------------------------------------
 
-(defun msg-ok (msg byz)
-  (unless byz
-    (or msg t)))
-    
-
 (defun hash-pt-pt (p1 p2)
   (convert-bytes-to-int
    (sha3-buffers (convert-pt-to-v p1)
                  (convert-pt-to-v p2))))
 
 ;; --------------------------------------------------------------------
-;; *COSIGNER-PKEYS* - a hashtable directory of public keys assigned to
+;; *COSI-PKEYS* - a hashtable directory of public keys assigned to
 ;; each node. Computing a public key query response, combined with
 ;; verification takes about 20 ms. So if we have thousands of nodes in
 ;; the cosi tree this would be a signifcant delay on every signature
@@ -196,126 +191,205 @@
 ;; public key query and verification of ZKP and insert into this table
 ;; before we engage those new participants in any Cosi chains.
 ;;
-(defvar *cosigner-pkeys* (make-hash-table))
+(defvar *cosi-pkeys* (make-hash-table))
 
 ;; --------------------------------------------------------------------
+;; Network node simulation
+;;
+;; For now, nodes are represented by a DLAMBDA closure with private state
 
-(defun make-participant (&key byz curve)
-  (let  (v          ;; the most recent commitment seed
-         seq        ;; the ID of the current Cosi round
-         subs       ;; list of my network subordinates
-         parts      ;; list of participant nodes this round
-         self)
-    (multiple-value-bind (skey pkey)
-        (with-curve curve
-          (ed-random-pair))
-      (setf self
+;; internal state of each node
+(defstruct (node-state
+            (:constructor %make-node-state))
+  skey       ;; secrect key
+  pkey       ;; public key
+  v          ;; the most recent commitment seed
+  seq        ;; the ID of the current Cosi round
+  subs       ;; list of my network subordinates
+  parts      ;; list of participant nodes this round
+  byz        ;; indicator for Byzantine behavior
+  self)
+
+(defun make-node-state (byz)
+  (multiple-value-bind (skey pkey) (ed-random-pair)
+    (%make-node-state
+     :pkey pkey
+     :skey skey
+     :byz  byz)))
+
+(defmacro with-node-state (state &body body)
+  `(with-accessors ((state-pkey  node-state-pkey)
+                    (state-skey  node-state-skey)
+                    (state-v     node-state-v)
+                    (state-seq   node-state-seq)
+                    (state-subs  node-state-subs)
+                    (state-parts node-state-parts)
+                    (state-byz   node-state-byz)
+                    (state-self  node-state-self)) ,state
+     (declare (ignorable state-pkey state-skey
+                         state-v    state-seq
+                         state-subs state-parts
+                         state-byz  state-self))
+     ,@body))
+
+#+:LISPWORKS
+(editor:setup-indent "with-node-state" 1)
+
+;; -------------------------------------------------------------
+;; Message handlers
+
+(defun msg-ok (msg byz)
+  (unless byz
+    (or msg t)))
+    
+(defun node-return-pkey+zkp (state)
+  ;; In response to a query about this node's public key, compute a
+  ;; ZKP to prove that we know the secret key, and return that proof
+  ;; along with the compressed public key EC point.
+  (with-node-state state
+    (multiple-value-bind (vv vvpt) (ed-random-pair)
+      (let* ((c  (hash-pt-pt vvpt state-pkey)) ;; Fiat-Shamir ZKP challenge
+             (r  (sub-mod *ed-r* vv
+                          (mult-mod *ed-r* state-skey c))))
+        (list r c (ed-compress-pt state-pkey)) ;; return ZKP and public key
+        ))))
+
+(defun node-validate-public-key (state triple)
+  (with-node-state state
+    (destructuring-bind (r c pkey) triple
+      (let* ((pt   (ed-decompress-pt pkey))
+             (vpt  (ed-add (ed-nth-pt r)
+                           (ed-mul pt c))))
+        (assert (= c (hash-pt-pt vpt pt)))
+        pt)) ;; return decompressed EC point
+    ))
+
+(defun node-reset (state seq-id)
+  ;; maybe we should do sanity checking on seq-id?
+  (with-node-state state
+    (setf state-v     nil
+          state-seq   seq-id
+          state-parts nil)))
+
+(defun node-make-cosi-commitment (state seq-id msg)
+  ;;
+  ;; First phase of Cosi:
+  ;;   Decide if msg warrants a commitment. If so return a fresh
+  ;;   random value from the prime field isomorphic to the EC.
+  ;;   Hold onto that secret seed and return the random EC point.
+  ;;   Otherwise return a null value.
+  ;;
+  ;; We hold that value for the next phase of Cosi.
+  ;;
+  (with-node-state state
+    (funcall state-self :reset seq-id) ;; starting new round of Cosi
+    (when (msg-ok msg state-byz)
+      (multiple-value-bind (v vpt) (ed-random-pair)
+        (setf state-v v) ;; hold secret random seed
+        (let ((tparts (list state-self)))
+          (dolist (node state-subs)
+            (multiple-value-bind (plst pt)
+                (funcall node :commitment seq-id msg)
+              (when plst
+                (push node state-parts)
+                (setf tparts (append plst tparts)
+                      vpt    (ed-add vpt (ed-decompress-pt pt)))
+                )))
+          (values tparts
+                  (ed-compress-pt vpt))))
+      )))
+
+(defun node-compute-signature (state seq-id c)
+  ;;
+  ;; Second phase of Cosi:
+  ;;   Given challenge value c, compute the signature value
+  ;;     r = v - c * skey.
+  ;;   If we decided against signing in the first phase,
+  ;;   then return a null value.
+  ;;
+  (with-node-state state
+    (when (and state-v
+               (eql state-seq seq-id))
+      (let ((r  (sub-mod *ed-r* state-v (mult-mod *ed-r* c state-skey))))
+        (dolist (node state-parts)
+          (setf r (add-mod *ed-r* r (funcall node :signing seq-id c))))
+        r))))
+
+(defun node-compute-cosi (state seq-id msg)
+  ;; top-level entry for Cosi signature creation
+  ;; assume for now that leader cannot be corrupted...
+  (with-node-state state
+    (multiple-value-bind (tparts vpt)
+        (funcall state-self :commitment seq-id msg)
+      (let* ((c    (hash-pt-msg (ed-decompress-pt vpt) msg)) ;; compute global challenge
+             (r    (funcall state-self :signing seq-id c)))
+        (list msg
+              (list c    ;; cosi signature
+                    r
+                    tparts))
+        ))))
+
+(defun node-validate-cosi (state msg sig)
+  ;; toplevel entry for Cosi signature validation checking
+  (with-node-state state
+    (destructuring-bind (c r tparts) sig
+      (let* ((tkey (reduce (lambda (ans node)
+                             (let ((pkey (gethash node *cosi-pkeys*)))
+                               (ed-add ans pkey)))
+                           tparts
+                           :initial-value (ed-neutral-point)))
+             (vpt  (ed-add (ed-nth-pt r)
+                           (ed-mul tkey c)))
+             (h    (hash-pt-msg vpt msg)))
+        (assert (= h c))
+        (list msg sig))
+      )))
+
+;; ------------------------------------------------------------
+
+(defun make-node (&key byz)
+  (let ((state (make-node-state byz)))
+    (with-node-state state
+      (setf state-self
             (um:dlambda
+
+              ;; -------------------------------------------
+              ;; Cosi entry points
               
-              (:public-key (&key curve)
+              (:public-key ()
                ;; inform the caller of my public key
-               (with-curve curve
-                 (multiple-value-bind (vv vvpt) (ed-random-pair)
-                   (let* ((c  (hash-pt-pt vvpt pkey)) ;; Fiat-Shamir ZKP
-                          (r  (sub-mod *ed-r* vv
-                                       (mult-mod *ed-r* skey c))))
-                     (list r c (ed-compress-pt pkey) curve))
-                   )))
-
-              (:validate-public-key (quad)
-               (destructuring-bind (r c pkey curve) quad
-                 (with-curve curve
-                   (let* ((p    (ed-decompress-pt pkey))
-                          (vpt  (ed-add (ed-nth-pt r)
-                                        (ed-mul p c))))
-                     (assert (= c (hash-pt-pt vpt p)))
-                     p)) ;; return decompressed EC point
-                 ))
+               (node-return-pkey+zkp state))
               
-              (:setup-tree (nodes)
-               (setf subs nodes))
-
+              (:validate-public-key (triple)
+               (node-validate-public-key state triple))
+              
               (:reset (seq-id)
-               (setf v     nil
-                     seq   seq-id
-                     parts nil))
-              
-              (:commitment (seq-id msg &key curve)
-               ;;
-               ;; First phase of Cosi:
-               ;;   Decide if msg warrants a commitment. If so return a fresh
-               ;;   random value from the prime field isomorphic to the EC.
-               ;;   Hold onto that secret seed and return the random EC point.
-               ;;   Otherwise return a null value.
-               ;;
-               ;; We hold that value for the next phase of Cosi.
-               ;;
-               (funcall self :reset seq-id) ;; starting new round of Cosi
-               (when (msg-ok msg byz)
-                 (with-curve curve
-                   (multiple-value-bind (vv vvpt) (ed-random-pair)
-                     (setf v vv) ;; hold secret random seed
-                     (let ((tparts (list self)))
-                       (dolist (node subs)
-                         (multiple-value-bind (plst pt)
-                             (funcall node :commitment seq-id msg :curve curve)
-                           (when plst
-                             (push node parts)
-                             (setf tparts (append plst tparts)
-                                   vvpt   (ed-add vvpt (ed-decompress-pt pt)))
-                             )))
-                       (values tparts
-                               (ed-compress-pt vvpt))))
-                   )))
-              
-              (:signing (seq-id c &key curve)
-               ;;
-               ;; Second phase of Cosi:
-               ;;   Given challenge value c, compute the signature value
-               ;;     r = v - c * skey.
-               ;;   If we decided against signing in the first phase,
-               ;;   then return a null value.
-               ;;
-               (when (and v
-                          (eql seq seq-id))
-                 (with-curve curve curve
-                   (let ((r  (sub-mod *ed-r* v (mult-mod *ed-r* c skey))))
-                     (dolist (node parts)
-                       (setf r (add-mod *ed-r* r (funcall node :signing seq-id c :curve curve))))
-                     r))))
+               (node-reset state seq-id))
 
-              (:cosi (seq-id msg &key curve)
-               ;; top-level entry for Cosi signature creation
-               ;; assume for now that leader cannot be corrupted...
-               (with-curve curve
-                 (multiple-value-bind (tparts vpt)
-                     (funcall self :commitment seq-id msg :curve curve)
-                   (let* ((c    (hash-pt-msg (ed-decompress-pt vpt) msg)) ;; compute global challenge
-                          (r    (funcall self :signing seq-id c :curve curve)))
-                     (list msg
-                           (list c    ;; cosi signature
-                                 r
-                                 tparts
-                                 curve))))
-                 ))
+              (:commitment (seq-id msg)
+               ;; start of new Cosi signature computation
+               (node-make-cosi-commitment state seq-id msg))
+            
+              (:signing (seq-id c)
+               ;; finish of new Cosi signature computation
+               (node-compute-signature state seq-id c))
+
+              (:cosi (seq-id msg)
+               ;; compute a grand Cosi signature
+               (node-compute-cosi state seq-id msg))
 
               (:validate (msg sig)
-               (destructuring-bind (c r tparts curve) sig
-                 (with-curve curve
-                   (let* ((tkey (reduce (lambda (ans node)
-                                          (let ((pkey (gethash node *cosigner-pkeys*)))
-                                            (ed-add ans pkey)))
-                                        tparts
-                                        :initial-value (ed-neutral-point)))
-                          (vpt  (ed-add (ed-nth-pt r)
-                                        (ed-mul tkey c)))
-                          (h    (hash-pt-msg vpt msg)))
-                     (assert (= h c))
-                     (list msg sig))
-                   )))
+               ;; validate a Cosi signature against a message
+               (node-validate-cosi state msg sig))
 
+              ;; -----------------------------------------
+              ;; for simulation tree construction...
+              
+              (:setup-tree (nodes)
+               (setf state-subs nodes))
+              
               (:count-nodes ()
-               (1+ (loop for node in subs sum
+               (1+ (loop for node in state-subs sum
                          (funcall node :count-nodes))))
               )))))
 
@@ -323,41 +397,41 @@
 ;; ----------------------------------------------------------------------------
 ;; Test Code
 
-(defvar *cosigners* nil)
-(defvar *top-node*  nil)
+(defvar *cosi-nodes* nil)
+(defvar *top-node*   nil)
 
-(defun build-cosigner-directory ()
-  (clrhash *cosigner-pkeys*)
-  (dolist (node *cosigners*)
-    (setf (gethash node *cosigner-pkeys*)
+(defun build-cosi-directory ()
+  (clrhash *cosi-pkeys*)
+  (dolist (node *cosi-nodes*)
+    (setf (gethash node *cosi-pkeys*)
           (funcall *top-node* :validate-public-key (funcall node :public-key)))))
 
-(defun build-tree (&optional (n 900))
+(defun build-cosi-tree (&optional (n 900))
   ;; default N = 900 produces a tree with 1000 nodes
   ;; good for timings
   (print "Generate nodes")
-  (let ((all (time (loop repeat n collect (make-participant)))))
+  (let ((all (time (loop repeat n collect (make-node)))))
     (print "Generate node tree")
     (time
      (um:nlet-tail iter ((nodes all)
                          (tops  nil))
        (if (endp nodes)
            (if (um:single tops)
-               (setf *cosigners* all
-                     *top-node*  (car tops))
+               (setf *cosi-nodes* all
+                     *top-node*   (car tops))
              (progn
               (format t "~%~A Nodes" (length tops))
               (iter tops nil)))
-         (let* ((top  (make-participant)))
+         (let* ((top  (make-node)))
            (push top all)
            (funcall top :setup-tree (um:take 10 nodes))
            (iter (um:drop 10 nodes) (cons top tops)))
          ))))
   (print "Building cosigner public key directory")
-  (time (build-cosigner-directory)))
+  (time (build-cosi-directory)))
 
 #|
-(build-tree 90)
+(build-cosi-tree 900)
 
 (funcall *top-node* :count-nodes)
 
