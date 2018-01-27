@@ -175,26 +175,33 @@
                  (convert-pt-to-v p2))))
 
 ;; --------------------------------------------------------------------
-;; *COSI-PKEYS* - a hashtable directory of public keys assigned to
-;; each node. Computing a public key query response, combined with
-;; verification takes about 20 ms. So if we have thousands of nodes in
-;; the cosi tree this would be a signifcant delay on every signature
-;; verification. (10's of sec)
-;;
-;; Hence at startup, we should query all participating nodes for their
-;; public key responses, compute the verification of those responses,
-;; and store their public keys in a hashtable for faster verification
-;; later.
-;;
-;; This also means that if any nodes join later, or existing nodes
-;; change their keying, then we need special handlers to perfom the
-;; public key query and verification of ZKP and insert into this table
-;; before we engage those new participants in any Cosi chains.
-;;
-(defvar *cosi-pkeys* (make-hash-table))
-
-;; --------------------------------------------------------------------
 ;; Network node simulation
+;;
+;; A Cosi network is presumed to be a tree of cooperating nodes, with
+;; each node having some numnber of peers under its direction. Each
+;; node carries out a portion of the Cosi protocol, and combines its
+;; result with those of its directed peers. The peers perform this
+;; same action recursively. The top node of the tree submits the final
+;; result.
+;;
+;; Every potential signature verifier node needs to know the public
+;; keys of all cosigner nodes. Public keys aren't simply transmitted
+;; to requestors, since attackers could substitute forged signature if
+;; they desired. Rather, all requests for public keys from nodes must
+;; be returned with an accompanying NIZKP to prove that the responding
+;; node actually knows the private key associated with the public key.
+;;
+;; Collecting all these public keys and verifying the NIZKP's takes
+;; considerable time for large Cosi networks. It also implies a lot of
+;; network traffic.
+;;
+;; So rather than forcing the verifiers to go out and request public
+;; keys from all the cosigners, we include the cosigner public keys
+;; with their individual ZKP's as part of the overall message
+;; signature. This roughly triples the signature size, to around 114
+;; bytes / cosigner key. But that likely pales in comparison to
+;; constant network traffic. Verifier nodes can cache fully verified
+;; public keys so they don't need to repeat the proof verification.
 ;;
 ;; For now, nodes are represented by a DLAMBDA closure with private state
 
@@ -203,6 +210,7 @@
             (:constructor %make-node-state))
   skey       ;; secrect key
   pkey       ;; public key
+  zkp        ;; cached NIZKP of our public key
   v          ;; the most recent commitment seed
   seq        ;; the ID of the current Cosi round
   subs       ;; list of my network subordinates
@@ -220,13 +228,14 @@
 (defmacro with-node-state (state &body body)
   `(with-accessors ((state-pkey  node-state-pkey)
                     (state-skey  node-state-skey)
+                    (state-zkp   node-state-zkp)
                     (state-v     node-state-v)
                     (state-seq   node-state-seq)
                     (state-subs  node-state-subs)
                     (state-parts node-state-parts)
                     (state-byz   node-state-byz)
                     (state-self  node-state-self)) ,state
-     (declare (ignorable state-pkey state-skey
+     (declare (ignorable state-pkey state-skey state-zkp
                          state-v    state-seq
                          state-subs state-parts
                          state-byz  state-self))
@@ -236,7 +245,7 @@
 (editor:setup-indent "with-node-state" 1)
 
 ;; -------------------------------------------------------------
-;; Stand-in for network comms...
+;; Stand-in for Cosi network comms...
 ;;
 ;; Nodes have a GENSYM ID, and a DLAMBDA handler closure
 ;; Each node stores its own private local state
@@ -245,7 +254,7 @@
   fn
   id)
 
-(defvar *cosi-nodes* (make-hash-table))
+(defvar *cosi-nodes* (make-hash-table)) ;; a hashtable linking node ID with simulator closure
 
 (defmethod send ((node cosi-node) &rest msg)
   (apply (cosi-node-fn node) msg))
@@ -254,10 +263,11 @@
   (apply 'send (gethash node *cosi-nodes*) msg))
 
 (defun self-call (state &rest msg)
+  ;; SELF-CALL - to distinguish from socket operations
   (apply (cosi-node-fn (node-state-self state)) msg))
 
 ;; -------------------------------------------------------------
-;; Message handlers
+;; Message handlers for Cosi nodes
 
 (defun msg-ok (msg byz)
   (unless byz
@@ -267,23 +277,18 @@
   ;; In response to a query about this node's public key, compute a
   ;; ZKP to prove that we know the secret key, and return that proof
   ;; along with the compressed public key EC point.
+  ;;
+  ;; We cache the computation on first request.
+  ;;
   (with-node-state state
-    (multiple-value-bind (vv vvpt) (ed-random-pair)
-      (let* ((c  (hash-pt-pt vvpt state-pkey)) ;; Fiat-Shamir ZKP challenge
-             (r  (sub-mod *ed-r* vv
-                          (mult-mod *ed-r* state-skey c))))
-        (list r c (ed-compress-pt state-pkey)) ;; return ZKP and public key
-        ))))
-
-(defun node-validate-public-key (state triple)
-  (with-node-state state
-    (destructuring-bind (r c pkey) triple
-      (let* ((pt   (ed-decompress-pt pkey))
-             (vpt  (ed-add (ed-nth-pt r)
-                           (ed-mul pt c))))
-        (assert (= c (hash-pt-pt vpt pt)))
-        pt)) ;; return decompressed EC point
-    ))
+    (or state-zkp 
+        (multiple-value-bind (v vpt) (ed-random-pair)
+          (let* ((c     (hash-pt-pt vpt state-pkey)) ;; Fiat-Shamir NIZKP challenge
+                 (r     (sub-mod *ed-r* v
+                                 (mult-mod *ed-r* state-skey c)))
+                 (pcmpr (ed-compress-pt state-pkey)))
+            (setf state-zkp (list r c pcmpr))) ;; NIZKP and public key
+          ))))
 
 (defun node-reset (state seq-id)
   ;; maybe we should do sanity checking on seq-id?
@@ -307,7 +312,7 @@
     (when (msg-ok msg state-byz)
       (multiple-value-bind (v vpt) (ed-random-pair)
         (setf state-v v) ;; hold secret random seed
-        (let ((tparts (list (cosi-node-id state-self))))
+        (let ((tparts (list (self-call state :public-key))))
           (dolist (node state-subs)
             (multiple-value-bind (plst pt)
                 (send node :commitment seq-id msg)
@@ -350,12 +355,63 @@
                     tparts))
         ))))
 
+(defvar *subs-per-node*  9)
+
+(defun node-try-insert-node (state node level)
+  ;; Simulate adding a fresh node to the tree.
+  ;;
+  ;; If the insertion can't happen in this node, and level is not yet
+  ;; zero, then the request is passed to some peer at decremented
+  ;; level. If level reaches zero without success then NIL is returned
+  ;; to the caller, and the global level should be incremented for
+  ;; another try.
+  ;;
+  (with-node-state state
+    (let ((capy (- *subs-per-node* (length state-subs))))
+      (cond ((plusp capy)
+             (push node state-subs))
+            ((plusp level)
+             (some (lambda (sub)
+                     (send sub :try-insert-node node (1- level)))
+                   state-subs))
+            ))))
+    
+(defun node-must-insert-node (state node)
+  ;; this should only be performed on by the top node
+  (with-node-state state
+    (labels ((ins (level)
+               (unless (self-call state :try-insert-node node level)
+                 (ins (1+ level)))))
+      (ins 0))))
+      
+(defvar *top-node*   nil)
+
+;; --------------------------------------------------------------------
+;; Message handlers for verifier nodes
+
+(defvar *cosi-pkeys* (make-hash-table)) ;; previously verified public keys
+
+(defun node-validate-public-key (state triple)
+  ;; Each verifier node maintains a cache of previously verified
+  ;; public keys in *COSI-PKEYS*. If we have already seen the pkey in
+  ;; the triple and verified it, we bypass re-verification and use the
+  ;; cached value.
+  (with-node-state state
+    (destructuring-bind (r c pkey) triple
+      (or  (gethash pkey *cosi-pkeys*)
+           (let* ((pt   (ed-decompress-pt pkey)) ;; node's public key
+                  (vpt  (ed-add (ed-nth-pt r)    ;; validate with NIZKP 
+                                (ed-mul pt c))))
+             (assert (= c (hash-pt-pt vpt pt)))
+             (setf (gethash pkey *cosi-pkeys*) pt)) ;; return decompressed EC point
+           ))))
+
 (defun node-validate-cosi (state msg sig)
   ;; toplevel entry for Cosi signature validation checking
   (with-node-state state
     (destructuring-bind (c r tparts) sig
-      (let* ((tkey (reduce (lambda (ans node)
-                             (let ((pkey (gethash node *cosi-pkeys*)))
+      (let* ((tkey (reduce (lambda (ans tpart)
+                             (let ((pkey (node-validate-public-key state tpart)))
                                (ed-add ans pkey)))
                            tparts
                            :initial-value (ed-neutral-point)))
@@ -367,15 +423,18 @@
       )))
 
 ;; ------------------------------------------------------------
+;; MAKE-NODE -- make a Cosi network node simulation closure
 
 (defun make-node (&key byz)
-  (let ((state (make-node-state byz)))
+  ;; assigns a node ID (with GENSYM) and returns a state object after
+  ;; registering with the ID-closure cross reference table for SENDs.
+  (let ((state (make-node-state byz))) ;; assigns random ECC keying
+    (node-return-pkey+zkp state) ;; done for pre-caching side effect
     (with-node-state state
       (setf state-self
             (make-cosi-node
              :id (gensym)
              :fn (um:dlambda
-                   
                    ;; -------------------------------------------
                    ;; Cosi entry points
                    
@@ -400,6 +459,18 @@
                    (:cosi (seq-id msg)
                     ;; compute a grand Cosi signature
                     (node-compute-cosi state seq-id msg))
+
+                   (:try-insert-node (node level)
+                    ;; insert a node somewhere in this subtree
+                    (node-try-insert-node state node level))
+
+                   (:insert-node (node)
+                    ;; must insert a node in the tree somewhere
+                    ;; should only be sent to the master node
+                    (node-must-insert-node state node))
+                   
+                   ;; -----------------------------------------
+                   ;; Verifier entry points
                    
                    (:validate (msg sig)
                     ;; validate a Cosi signature against a message
@@ -408,61 +479,71 @@
                    ;; -----------------------------------------
                    ;; for simulation tree construction...
                    
-                   (:setup-tree (nodes)
-                    (setf state-subs nodes))
-                   
                    (:count-nodes ()
+                    ;; for manual verification
                     (1+ (loop for node in state-subs sum
                               (send node :count-nodes))))
-                   ))))))
+                   
+                   (:tree-subs ()
+                    ;; for tree visualization
+                    state-subs)
+                   ))
+            ;; register ourself with the SEND cross reference table
+            (gethash (cosi-node-id state-self) *cosi-nodes*) state-self))))
 
 #||#
 ;; ----------------------------------------------------------------------------
 ;; Test Code
 
-(defvar *top-node*   nil)
-
-(defun build-cosi-directory ()
-  (clrhash *cosi-pkeys*)
-  (maphash (lambda (id node)
-             (setf (gethash id *cosi-pkeys*)
-                   (send *top-node* :validate-public-key (send node :public-key))))
-           *cosi-nodes*))
-
-(defun build-cosi-node-table (nodes)
+(defun insert-node (node level)
+  (if (send *top-node* :insert-node node level)
+      level
+    (insert-node node (1+ level))))
+      
+(defun organic-build-tree (&optional (n 1000))
   (clrhash *cosi-nodes*)
-  (dolist (node nodes)
-    (setf (gethash (cosi-node-id node) *cosi-nodes*) node)))
-
-(defun build-cosi-tree (&optional (n 900))
-  ;; default N = 900 produces a tree with 1000 nodes
-  ;; good for timings
-  (print "Generate nodes")
+  (clrhash *cosi-pkeys*)
+  (print "Bulding cosigner node tree")
   (let ((all (time (loop repeat n collect (make-node)))))
-    (print "Generate node tree")
+    (setf *top-node* (cosi-node-id (car all)))
     (time
-     (um:nlet-tail iter ((nodes all)
-                         (tops  nil))
-       (if (endp nodes)
-           (if (um:single tops)
-               (progn
-                 (setf *top-node* (cosi-node-id (car tops)))
-                 (build-cosi-node-table all))
-             (progn
-              (format t "~%~A Nodes" (length tops))
-              (iter tops nil)))
-         (let* ((top  (make-node)))
-           (push top all)
-           (send top :setup-tree (mapcar 'cosi-node-id (um:take 10 nodes)))
-           (iter (um:drop 10 nodes) (cons top tops)))
-         ))))
-  (print "Building cosigner public key directory")
-  (time (build-cosi-directory)))
+     (let ((level 0))
+       (dolist (node (cdr all))
+         (setf level (insert-node (cosi-node-id node) level))))
+     )))
+
+;; --------------------------------------------------------------------
+;; for visual debugging...
+
+#+:LISPWORKS
+(progn
+  (defmethod children ((node symbol) layout)
+    (reverse (send node :tree-subs)))
+
+  (defmethod print-node (x keyfn)
+    nil)
+
+  (defmethod print-node ((node symbol) keyfn)
+    (format nil "~A" (funcall keyfn node)))
+  
+  (defmethod view-tree ((tree symbol) &key (key #'identity) (layout :left-right))
+    (capi:contain
+     (make-instance 'capi:graph-pane
+                    :layout-function layout
+                    :roots (list tree)
+                    :children-function (lambda (node)
+                                         (children node layout))
+                    :print-function (lambda (node)
+                                      (print-node node key))
+                    ))))
+
+;; --------------------------------------------------------------------
 
 #|
-(build-cosi-tree 90)
+(organic-build-tree 1000)
 
 (send *top-node* :count-nodes)
+(view-tree *top-node*)
 
 (defvar *x*
   (time (send *top-node* :cosi 1 "this is a test")))
@@ -470,6 +551,8 @@
 (time (send *top-node* :validate (car *x*) (cadr *x*)))
 
  |#
+;; ==================================================================
+;; Here and below is cut #0 on the Brooks scale
 ;; ---------------------------------------------------------------
 
 (defun schnorr-signature (skey msg &key curve)
