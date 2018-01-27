@@ -256,11 +256,11 @@
 
 (defvar *cosi-nodes* (make-hash-table)) ;; a hashtable linking node ID with simulator closure
 
-(defmethod send ((node cosi-node) &rest msg)
+(defmethod ask ((node cosi-node) &rest msg)
   (apply (cosi-node-fn node) msg))
 
-(defmethod send ((node symbol) &rest msg)
-  (apply 'send (gethash node *cosi-nodes*) msg))
+(defmethod ask ((node symbol) &rest msg)
+  (apply 'ask (gethash node *cosi-nodes*) msg))
 
 (defun self-call (state &rest msg)
   ;; SELF-CALL - to distinguish from socket operations
@@ -315,7 +315,7 @@
         (let ((tparts (list (self-call state :public-key))))
           (dolist (node state-subs)
             (multiple-value-bind (plst pt)
-                (send node :commitment seq-id msg)
+                (ask node :commitment seq-id msg)
               (when plst
                 (push node state-parts)
                 (setf tparts (append plst tparts)
@@ -338,7 +338,7 @@
                (eql state-seq seq-id))
       (let ((r  (sub-mod *ed-r* state-v (mult-mod *ed-r* c state-skey))))
         (dolist (node state-parts)
-          (setf r (add-mod *ed-r* r (send node :signing seq-id c))))
+          (setf r (add-mod *ed-r* r (ask node :signing seq-id c))))
         r))))
 
 (defun node-compute-cosi (state seq-id msg)
@@ -372,7 +372,7 @@
              (push node state-subs))
             ((plusp level)
              (some (lambda (sub)
-                     (send sub :try-insert-node node (1- level)))
+                     (ask sub :try-insert-node node (1- level)))
                    state-subs))
             ))))
     
@@ -427,7 +427,7 @@
 
 (defun make-node (&key byz)
   ;; assigns a node ID (with GENSYM) and returns a state object after
-  ;; registering with the ID-closure cross reference table for SENDs.
+  ;; registering with the ID-closure cross reference table for ASK's.
   (let ((state (make-node-state byz))) ;; assigns random ECC keying
     (node-return-pkey+zkp state) ;; done for pre-caching side effect
     (with-node-state state
@@ -461,7 +461,7 @@
                     (node-compute-cosi state seq-id msg))
 
                    (:try-insert-node (node level)
-                    ;; insert a node somewhere in this subtree
+                    ;; try to insert a node somewhere in this subtree
                     (node-try-insert-node state node level))
 
                    (:insert-node (node)
@@ -482,24 +482,19 @@
                    (:count-nodes ()
                     ;; for manual verification
                     (1+ (loop for node in state-subs sum
-                              (send node :count-nodes))))
+                              (ask node :count-nodes))))
                    
                    (:tree-subs ()
                     ;; for tree visualization
                     state-subs)
                    ))
-            ;; register ourself with the SEND cross reference table
+            ;; register ourself with the ASK cross reference table
             (gethash (cosi-node-id state-self) *cosi-nodes*) state-self))))
 
 #||#
 ;; ----------------------------------------------------------------------------
 ;; Test Code
 
-(defun insert-node (node level)
-  (if (send *top-node* :insert-node node level)
-      level
-    (insert-node node (1+ level))))
-      
 (defun organic-build-tree (&optional (n 1000))
   (clrhash *cosi-nodes*)
   (clrhash *cosi-pkeys*)
@@ -507,10 +502,9 @@
   (let ((all (time (loop repeat n collect (make-node)))))
     (setf *top-node* (cosi-node-id (car all)))
     (time
-     (let ((level 0))
-       (dolist (node (cdr all))
-         (setf level (insert-node (cosi-node-id node) level))))
-     )))
+     (dolist (node (cdr all))
+       (ask *top-node* :insert-node (cosi-node-id node))))
+    ))
 
 ;; --------------------------------------------------------------------
 ;; for visual debugging...
@@ -518,7 +512,7 @@
 #+:LISPWORKS
 (progn
   (defmethod children ((node symbol) layout)
-    (reverse (send node :tree-subs)))
+    (reverse (ask node :tree-subs)))
 
   (defmethod print-node (x keyfn)
     nil)
@@ -540,15 +534,15 @@
 ;; --------------------------------------------------------------------
 
 #|
-(organic-build-tree 1000)
+(organic-build-tree 100)
 
-(send *top-node* :count-nodes)
+(ask *top-node* :count-nodes)
 (view-tree *top-node*)
 
 (defvar *x*
-  (time (send *top-node* :cosi 1 "this is a test")))
+  (time (ask *top-node* :cosi 1 "this is a test")))
 
-(time (send *top-node* :validate (car *x*) (cadr *x*)))
+(time (ask *top-node* :validate (car *x*) (cadr *x*)))
 
  |#
 ;; ==================================================================
