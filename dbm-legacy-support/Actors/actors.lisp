@@ -313,7 +313,11 @@
 
 (defmethod dispatch-message ((self actor) &rest msg)
   (dcase msg
-
+    
+    (:continuation-{14AFB5F8-D01F-11E7-A1BE-985AEBDA9C2A} (fn &rest vals)
+     ;; Used for callbacks into the Actor
+     (apply fn vals))
+    
     (:recv-timeout-{3A95A26E-D84E-11E7-9D93-985AEBDA9C2A} (timer-id)
      ;; an incoming RECV timeout message
      (actor-recv-timeout self timer-id))
@@ -341,10 +345,6 @@
                  ;; the caller.
                  (send replyTo (apply 'capture-ans-or-exn
                                 'self-call msg)))
-                     
-                (:continuation-{14AFB5F8-D01F-11E7-A1BE-985AEBDA9C2A} (fn &rest vals)
-                 ;; Used for callbacks into the Actor
-                 (apply fn vals))
                      
                 (t (&rest args)
                    ;; anything else is up to the programmer who
@@ -805,6 +805,11 @@
                 (=values ,form)))
      ,@body))
 
+(define-symbol-macro =bind-callback %sk)
+
+#+:LISPWORKS
+(editor:setup-indent "with-future"  2)
+
 ;; --------------------------------------------------
 ;; Async ASK
 
@@ -836,17 +841,18 @@
          (ansv  (make-array len)))
     (labels ((done (ix ans)
                (setf (aref ansv ix) ans)
-               (when (zerop (#+:LISPWORKS sys:atomic-decf
-                             #+:ALLEGRO   excl:decf-atomic
-                                          (car (the cons count))))
+               (when (zerop (mpcompat:atomic-decf (car (the cons count))))
                  (apply cbfn (coerce ansv 'list)))))
-      (loop for fn in fns
-            for ix from 0
-            do
-            (spawn (lambda (n fn)
-                     (done n (funcall fn)))
-                   ix fn))
-      )))
+      (if fns
+          (loop for fn in fns
+                for ix from 0
+                do
+                (spawn (lambda (n fn)
+                         (done n (funcall fn)))
+                       ix fn))
+        ;; else - nothing to do
+        (funcall cbfn)))
+    ))
 
 (defmacro with-futures (args forms &body body)
   ;; Be careful here... Actors are generally incompatible with
@@ -858,7 +864,49 @@
      (list ,@(mapcar #`(lambda () ,a1) forms)) ))
 
 #+:LISPWORKS
-(editor:setup-indent "with-future"  2)
-#+:LISPWORKS
 (editor:setup-indent "with-futures" 2)
+
+;; ----------------------------------------------------
+
+(defun trn (mat)
+  (apply 'mapcar 'list mat))
+
+(defun pmapcar (cbfn fn &rest lists)
+  ;; Parallel mapcar - calls cbfn with a result list.
+  ;; Use like PAR for indefinite number of parallel forms,
+  ;; each of which is the same function against different args.
+  (let* ((cbfn   (=cont cbfn))
+         (grps   (trn lists))
+         (len    (length grps))
+         (count  (list len))
+         (ansv   (make-array len)))
+    (labels ((done (ix ans)
+               (setf (aref ansv ix) ans)
+               (when (zerop (mpcompat:atomic-decf (car (the cons count))))
+                 (funcall cbfn (coerce ansv 'list)))))
+      (if grps
+          (loop for grp in grps
+                for ix from 0
+                do
+                (spawn (lambda (n grp)
+                         (done n (apply fn grp)))
+                       ix grp))
+        ;; else - empty lists, nothing to do
+        (funcall cbfn nil)))
+    ))
+
+(defmacro =pmapcar (fn &rest lists)
+  `(pmapcar %sk ,fn ,@lists))
+       
+#+:LISPWORKS
+(editor:setup-indent "=pmapcar" 2)
+
+#| ;; for example - query a bunch of remote nodes
+(=bind (lst)
+    (=pmapcar (lambda (node)
+                (send node :query))
+        nodes)
+  (do-something-with-result lst))
+|#
+
 

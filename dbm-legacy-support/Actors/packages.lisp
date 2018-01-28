@@ -71,6 +71,7 @@
    #:=lambda
    #:=defun
    #:=bind
+   #:=bind-callback
    #:=values
    #:=funcall
    #:=apply
@@ -78,7 +79,9 @@
    #:with-future
    #:par
    #:with-futures
-
+   #:pmapcar
+   #:=pmapcar
+   
    #:with-borrowed-mailbox
    ))
 
