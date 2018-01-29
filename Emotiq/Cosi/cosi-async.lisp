@@ -300,7 +300,7 @@
 ;; Message handlers for Cosi nodes
 
 (defvar *subs-per-node*  9)
-(defvar *default-timeout-period* 5)
+(defvar *default-timeout-period* 40)
 
 (defun msg-ok (msg byz)
   (unless byz
@@ -540,13 +540,11 @@
                                 ((list :node-not-inserted)
                                  (try (cdr nodes)))
 
-                                #|
                                 :TIMEOUT *default-timeout-period*
                                 :ON-TIMEOUT
                                 (progn
                                   (mark-node-no-response state (car nodes))
                                   (try (cdr nodes)))
-                                |#
                                 )))))
                  (try state-subs)))
               
@@ -666,8 +664,10 @@
   (let ((all (time (loop repeat n collect (make-node)))))
     (setf *top-node* (cosi-node-id (car all)))
     (time
-     (dolist (node (cdr all))
-       (send *top-node* :insert-node nil (cosi-node-id node))))
+     (progn
+       (dolist (node (cdr all))
+         (send *top-node* :insert-node nil (cosi-node-id node)))
+       (ask *top-node* :count-nodes)))
     (print "Validating public keys")
     (time
      (validate-public-keys))
@@ -700,26 +700,32 @@
 
 ;; --------------------------------------------------------------------
 
-#|
-(defvar *x* nil)
+(defvar *x* nil) ;; saved result for inspection
 
-(defun tst (&optional (n 5))
-    (ac::kill-executives)
+(defun tst (&optional (n 100))
     (organic-build-tree n)
   
-    (ask *top-node* :count-nodes)
+    (format t "~%Nbr Nodes: ~A"
+            (ask *top-node* :count-nodes))
+
+    #+:LISPWORKS
     (view-tree *top-node*)
 
     (let ((msg "this is a test"))
       (ac:with-borrowed-mailbox (mbox)
         (send *top-node* :cosi mbox msg)
-        (time (setf *x* (mp:mailbox-read mbox)))
+        (format t "~%Create ~a node multi-signature" n)
+        (time (setf *x* (mpcompat:mailbox-read mbox)))
 
-        (ask *top-node* :validate msg (third *x*))
+        (print "Verify signature")
+        (time (ask *top-node* :validate msg (third *x*)))
         ))
     )
 
-(time (ask *top-node* :validate (car *x*) (cadr *x*)))
+#|
+(ac::kill-executives)
+
+(time (ask *top-node* :validate (second *x*) (third *x*)))
 
  |#
 ;; ==================================================================
