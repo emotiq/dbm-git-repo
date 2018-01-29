@@ -299,8 +299,8 @@
 ;; -------------------------------------------------------------
 ;; Message handlers for Cosi nodes
 
-(defvar *subs-per-node*  2)
-(defvar *default-timeout-period* 1)
+(defvar *subs-per-node*  9)
+(defvar *default-timeout-period* 5)
 
 (defun msg-ok (msg byz)
   (unless byz
@@ -314,7 +314,7 @@
   ;; We cache the computation on first request.
   ;;
   (with-node-state state
-    (apply 'reply reply-to
+    (reply reply-to
            (or state-zkp 
                (multiple-value-bind (v vpt) (ed-random-pair)
                  (let* ((c     (hash-pt-pt vpt state-pkey)) ;; Fiat-Shamir NIZKP challenge
@@ -323,6 +323,25 @@
                         (pcmpr (ed-compress-pt state-pkey)))
                    (setf state-zkp (list r c pcmpr))) ;; NIZKP and public key
                  )))))
+
+(defvar *cosi-pkeys* (make-hash-table)) ;; previously verified public keys
+
+(defun validate-public-keys ()
+  ;; Each verifier node maintains a cache of previously verified
+  ;; public keys in *COSI-PKEYS*. If we have already seen the pkey in
+  ;; the triple and verified it, we bypass re-verification and use the
+  ;; cached value.
+  (maphash (lambda (id node)
+             (declare (ignore node))
+             (destructuring-bind ((r c pcmpr))
+                 (ask id :public-key nil)
+               (let* ((pt   (ed-decompress-pt pcmpr)) ;; node's public key
+                      (vpt  (ed-add (ed-nth-pt r)    ;; validate with NIZKP 
+                                    (ed-mul pt c))))
+                 (assert (= c (hash-pt-pt vpt pt)))
+                 (setf (gethash id *cosi-pkeys*) pt)) ;; return decompressed EC point
+               ))
+           *cosi-nodes*))
 
 (defun node-reset (state seq-id)
   ;; maybe we should do sanity checking on seq-id?
@@ -359,11 +378,11 @@
     (ac:recv
       ((list* :commit ans)
        (funcall cbfn ans))
-      #|
+
       :TIMEOUT *default-timeout-period*
-      :ON-TIMEOUT
-      (funcall cbfn nil)
-      |#
+      :ON-TIMEOUT (progn
+                    (ac:become 'ac:do-nothing)
+                    (funcall cbfn nil))
       )))
 
 (defun group-commitment (cbfn nodes seq-id msg)
@@ -412,20 +431,19 @@
        (funcall cbfn ans))
       ((list :missing-node)
        (funcall cbfn nil))
-      #|
+      ((list :invalid-commitment)
+       (funcall cbfn nil))
+
       :TIMEOUT *default-timeout-period*
-      :ON-TIMEOUT
-      (funcall cbfn nil)
-      |#
+      :ON-TIMEOUT (progn
+                    (ac:become 'ac:do-nothing)
+                    (funcall cbfn nil))
       )))
 
 (defun group-signing (cbfn nodes seq-id c)
   (map-nodes cbfn (lambda (node done-fn)
                     (sub-signing done-fn node seq-id c))
              nodes))
-
-(define-condition missing-node (error)
-  ())
 
 (defun node-compute-signature (state reply-to seq-id c)
   ;;
@@ -436,25 +454,26 @@
   ;;   then return a null value.
   ;;
   (with-node-state state
-    (when (and state-v
-               (eql state-seq seq-id))
-      (let ((r  (sub-mod *ed-r* state-v (mult-mod *ed-r* c state-skey))))
+    (if (and state-v
+             (eql state-seq seq-id))
+      (let ((r  (sub-mod *ed-r* state-v (mult-mod *ed-r* c state-skey)))
+            (missing nil))
         (ac:=bind (lst)
             (group-signing ac:=bind-callback state-parts seq-id c)
-          (handler-case
-              (labels ((fold-answer (ans node)
-                         (cond ((null ans)
-                                (mark-node-no-response state node)
-                                (error (make-condition 'missing-node)))
-                               (t
-                                (setf r (add-mod *ed-r* r ans)))
-                               )))
-                (mapc #'fold-answer lst state-parts)
-                (reply reply-to :signed r))
-
-            (missing-node ()
-              (reply reply-to :missing-node))
+          (labels ((fold-answer (ans node)
+                     (cond ((null ans)
+                            (mark-node-no-response state node)
+                            (setf missing t))
+                           ((not missing)
+                            (setf r (add-mod *ed-r* r ans)))
+                           )))
+            (mapc #'fold-answer lst state-parts)
+            (if missing
+                (reply reply-to :missing-node)
+              (reply reply-to :signed r))
             )))
+      ;; else -- bad state
+      (reply reply-to :invalid-commitment) ;; request restart
       )))
 
 (defun node-compute-cosi (state reply-to msg)
@@ -462,11 +481,11 @@
   ;; assume for now that leader cannot be corrupted...
   (let ((self (ac:current-actor)))
     (with-node-state state
-      (send state-id :commitment self (incf state-session) msg)
+      (self-call :commitment self (incf state-session) msg)
       (ac:recv
         ((list :commit vpt tparts)
          (let ((c  (hash-pt-msg (ed-decompress-pt vpt) msg))) ;; compute global challenge
-           (send state-id :signing self state-seq c)
+           (self-call :signing self state-seq c)
            (ac:recv
              ((list :signed r)
               (reply reply-to :signature msg (list c    ;; cosi signature
@@ -475,8 +494,11 @@
              ((list :missing-node)
               ;; retry from start
               (node-compute-cosi state reply-to msg))
-             )))
-        ))))
+
+             ((list :invalid-commitment)
+              (error "Invalid commitment"))
+             ))))
+      )))
 
 ;; -------------------------------------------------------------
 
@@ -551,31 +573,14 @@
 ;; --------------------------------------------------------------------
 ;; Message handlers for verifier nodes
 
-(defvar *cosi-pkeys* (make-hash-table)) ;; previously verified public keys
-
-(defun node-validate-public-key (state triple)
-  ;; Each verifier node maintains a cache of previously verified
-  ;; public keys in *COSI-PKEYS*. If we have already seen the pkey in
-  ;; the triple and verified it, we bypass re-verification and use the
-  ;; cached value.
-  (with-node-state state
-    (destructuring-bind (r c pkey) triple
-      (or  (gethash pkey *cosi-pkeys*)
-           (let* ((pt   (ed-decompress-pt pkey)) ;; node's public key
-                  (vpt  (ed-add (ed-nth-pt r)    ;; validate with NIZKP 
-                                (ed-mul pt c))))
-             (assert (= c (hash-pt-pt vpt pt)))
-             (setf (gethash pkey *cosi-pkeys*) pt)) ;; return decompressed EC point
-           ))))
-
 (defun node-validate-cosi (state msg sig)
   ;; toplevel entry for Cosi signature validation checking
   (with-node-state state
-    (destructuring-bind (c r tparts) sig
-      (let* ((tkey (reduce (lambda (ans tpart)
-                             (let ((pkey (node-validate-public-key state tpart)))
+    (destructuring-bind (c r ids) sig
+      (let* ((tkey (reduce (lambda (ans id)
+                             (let ((pkey (gethash id *cosi-pkeys*)))
                                (ed-add ans pkey)))
-                           tparts
+                           ids
                            :initial-value (ed-neutral-point)))
              (vpt  (ed-add (ed-nth-pt r)
                            (ed-mul tkey c)))
@@ -614,7 +619,7 @@
                    
                    (:cosi (reply-to msg)
                     ;; compute a grand Cosi signature
-                    (ac:spawn 'node-compute-cosi state reply-to msg))
+                    (node-compute-cosi state reply-to msg))
 
                    (:try-insert-node (reply-to node level)
                     ;; try to insert a node somewhere in this subtree
@@ -627,9 +632,6 @@
                    
                    ;; -----------------------------------------
                    ;; Verifier entry points
-                   
-                   (:validate-public-key (triple)
-                    (node-validate-public-key state triple))
                    
                    (:validate (msg sig)
                     ;; validate a Cosi signature against a message
@@ -666,6 +668,9 @@
     (time
      (dolist (node (cdr all))
        (send *top-node* :insert-node nil (cosi-node-id node))))
+    (print "Validating public keys")
+    (time
+     (validate-public-keys))
     ))
 
 ;; --------------------------------------------------------------------
@@ -705,23 +710,13 @@
     (ask *top-node* :count-nodes)
     (view-tree *top-node*)
 
-      #||#
-    (let ((msg "this is a test"))
-      (ac:with-borrowed-mailbox (mbox)
-        (send *top-node* :commitment mbox 1 msg)
-        ;; (send *top-node* :cosi mbox msg)
-        (time (setf *x* (mp:mailbox-read mbox))))
-      (ac:with-borrowed-mailbox (mbox)
-        (send *top-node* :signing mbox 1 (second *x*))
-        (time (setf *x* (mp:mailbox-read mbox)))))
-      #||#
-    #||#
     (let ((msg "this is a test"))
       (ac:with-borrowed-mailbox (mbox)
         (send *top-node* :cosi mbox msg)
         (time (setf *x* (mp:mailbox-read mbox)))
+
+        (ask *top-node* :validate msg (third *x*))
         ))
-    #||#
     )
 
 (time (ask *top-node* :validate (car *x*) (cadr *x*)))
