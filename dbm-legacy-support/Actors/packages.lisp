@@ -81,6 +81,7 @@
    #:with-futures
    #:pmapcar
    #:=pmapcar
+   #:apar-map
    
    #:with-borrowed-mailbox
    #:do-nothing

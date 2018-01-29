@@ -25,6 +25,21 @@
   (:import-from :ecc-crypto-b571
 		:convert-int-to-nbytesv
 		:convert-bytes-to-int)
+  (:import-from :actors
+   :=bind
+   :=values
+   :=defun
+   :=lambda
+   :=funcall
+   :=apply
+   :apar-map
+   :spawn
+   :current-actor
+   :recv
+   :become
+   :do-nothing
+   :make-actor
+   :with-borrowed-mailbox)
   (:export
    :schnorr-signature
    :verify-schnorr-signature
@@ -205,6 +220,10 @@
 ;;
 ;; For now, nodes are represented by a DLAMBDA closure with private state
 
+(defvar *top-node*              nil) ;; node at top of node-tree
+(defvar *subs-per-node*           9) ;; each node is part of an N+1-way group
+(defvar *default-timeout-period* 40)
+
 ;; internal state of each node
 (defstruct (node-state
             (:constructor %make-node-state))
@@ -216,6 +235,7 @@
   seq        ;; the ID of the current Cosi round
   subs       ;; list of my network subordinates
   parts      ;; list of participant nodes this round
+  timeout    ;; current timeout period used by node
   byz        ;; indicator for Byzantine behavior
   ;; -------------
   (levels  0) ;; used by top node for node insertion
@@ -225,9 +245,10 @@
 (defun make-node-state (byz)
   (multiple-value-bind (skey pkey) (ed-random-pair)
     (%make-node-state
-     :pkey pkey
-     :skey skey
-     :byz  byz)))
+     :pkey    pkey
+     :skey    skey
+     :timeout *default-timeout-period*
+     :byz     byz)))
 
 (defmacro with-node-state (state &body body)
   `(with-accessors ((state-id         node-state-id)
@@ -240,10 +261,12 @@
                     (state-parts      node-state-parts)
                     (state-levels     node-state-levels)
                     (state-session    node-state-session)
+                    (state-timeout    node-state-timeout)
                     (state-byz        node-state-byz)
                     (state-self       node-state-self)) ,state
      (declare (ignorable state-id   state-pkey  state-skey state-zkp
                          state-v    state-seq
+                         state-timeout
                          state-subs state-parts state-levels  state-session
                          state-byz  state-self))
      ,@body))
@@ -299,9 +322,6 @@
 ;; -------------------------------------------------------------
 ;; Message handlers for Cosi nodes
 
-(defvar *subs-per-node*  9)
-(defvar *default-timeout-period* 40)
-
 (defun msg-ok (msg byz)
   (unless byz
     (or msg t)))
@@ -323,6 +343,8 @@
                         (pcmpr (ed-compress-pt state-pkey)))
                    (setf state-zkp (list r c pcmpr))) ;; NIZKP and public key
                  )))))
+
+;; ----------------------------------------------------------------------
 
 (defvar *cosi-pkeys* (make-hash-table)) ;; previously verified public keys
 
@@ -350,45 +372,30 @@
           state-seq   seq-id
           state-parts nil)))
 
-(defun map-nodes (cbfn node-fn nodes)
-  (if nodes
-      (let* ((len   (length nodes))
-             (count (list len))
-             (ansv  (make-array len)))
-        (labels ((done (ix ans)
-                   (setf (aref ansv ix) ans)
-                   (when (zerop (mpcompat:atomic-decf (car (the cons count))))
-                     (funcall cbfn (coerce ansv 'list))))
-                 (callback (ix)
-                   (lambda (ans)
-                     (done ix ans))))
-          (loop for node in nodes
-                for ix from 0
-                do
-                (ac:spawn node-fn node (callback ix)))
-          ))
-    ;; else - no nodes
-    (funcall cbfn nil)
-    ))
+;; -----------------------------------------------------------------------
 
+(=defun map-nodes (node-fn nodes &rest args)
+  ;; async parallel mapping of node-fn across list of nodes, with args
+  ;; applied to each node
+  (apar-map (=lambda (node)
+              (lambda ()
+                (=apply node-fn node args)))
+            nodes))
 
-(defun sub-commitment (cbfn node seq-id msg)
-  (let ((self (ac:current-actor)))
+;; -----------------------------------------------------------------------
+
+(=defun sub-commitment (node seq-id msg timeout)
+  (let ((self (current-actor)))
     (send node :commitment self seq-id msg)
-    (ac:recv
+    (recv
       ((list* :commit ans)
-       (funcall cbfn ans))
+       (=values ans))
 
-      :TIMEOUT *default-timeout-period*
+      :TIMEOUT timeout
       :ON-TIMEOUT (progn
-                    (ac:become 'ac:do-nothing)
-                    (funcall cbfn nil))
+                    (become 'do-nothing)
+                    (=values nil))
       )))
-
-(defun group-commitment (cbfn nodes seq-id msg)
-  (map-nodes cbfn (lambda (node done-fn)
-                    (sub-commitment done-fn node seq-id msg))
-             nodes))
 
 (defun node-make-cosi-commitment (state reply-to seq-id msg)
   ;;
@@ -406,8 +413,9 @@
       (multiple-value-bind (v vpt) (ed-random-pair)
         (setf state-v v) ;; hold secret random seed
         (let ((tparts (list state-id)))
-          (ac:=bind (lst)
-              (group-commitment ac:=bind-callback state-subs seq-id msg)
+          (=bind (lst)
+              (map-nodes '=sub-commitment state-subs
+                         seq-id msg state-timeout)
             (labels ((fold-answer (ans node)
                        (cond ((null ans)
                               (mark-node-no-response state node))
@@ -423,27 +431,21 @@
               ))))
       )))
 
-(defun sub-signing (cbfn node seq-id c)
-  (let ((self (ac:current-actor)))
+(=defun sub-signing (node seq-id c timeout)
+  (let ((self (current-actor)))
     (send node :signing self seq-id c)
-    (ac:recv
+    (recv
       ((list :signed ans)
-       (funcall cbfn ans))
-      ((list :missing-node)
-       (funcall cbfn nil))
-      ((list :invalid-commitment)
-       (funcall cbfn nil))
+       (=values ans))
+      ((list (or :missing-node
+                 :invalid-commitment))
+       (=values nil))
 
-      :TIMEOUT *default-timeout-period*
+      :TIMEOUT timeout
       :ON-TIMEOUT (progn
-                    (ac:become 'ac:do-nothing)
-                    (funcall cbfn nil))
+                    (become 'do-nothing)
+                    (=values nil))
       )))
-
-(defun group-signing (cbfn nodes seq-id c)
-  (map-nodes cbfn (lambda (node done-fn)
-                    (sub-signing done-fn node seq-id c))
-             nodes))
 
 (defun node-compute-signature (state reply-to seq-id c)
   ;;
@@ -458,8 +460,9 @@
              (eql state-seq seq-id))
       (let ((r  (sub-mod *ed-r* state-v (mult-mod *ed-r* c state-skey)))
             (missing nil))
-        (ac:=bind (lst)
-            (group-signing ac:=bind-callback state-parts seq-id c)
+        (=bind (lst)
+            (map-nodes '=sub-signing state-parts
+                       seq-id c state-timeout)
           (labels ((fold-answer (ans node)
                      (cond ((null ans)
                             (mark-node-no-response state node)
@@ -479,14 +482,14 @@
 (defun node-compute-cosi (state reply-to msg)
   ;; top-level entry for Cosi signature creation
   ;; assume for now that leader cannot be corrupted...
-  (let ((self (ac:current-actor)))
+  (let ((self (current-actor)))
     (with-node-state state
       (self-call :commitment self (incf state-session) msg)
-      (ac:recv
+      (recv
         ((list :commit vpt tparts)
          (let ((c  (hash-pt-msg (ed-decompress-pt vpt) msg))) ;; compute global challenge
            (self-call :signing self state-seq c)
-           (ac:recv
+           (recv
              ((list :signed r)
               (reply reply-to :signature msg (list c    ;; cosi signature
                                                    r
@@ -532,7 +535,7 @@
                               (fail)
                             (progn
                               (send (car nodes) :try-insert-node state-id node (1- level))
-                              (ac:recv
+                              (recv
 
                                 ((list :node-inserted)
                                  (success))
@@ -540,7 +543,7 @@
                                 ((list :node-not-inserted)
                                  (try (cdr nodes)))
 
-                                :TIMEOUT *default-timeout-period*
+                                :TIMEOUT state-timeout
                                 :ON-TIMEOUT
                                 (progn
                                   (mark-node-no-response state (car nodes))
@@ -557,7 +560,7 @@
   (with-node-state state
     (labels ((ins ()
                (self-call :try-insert-node state-id node state-levels)
-               (ac:recv
+               (recv
                  ((list :node-inserted)
                   (reply reply-to :node-inserted))
                  ((list :node-not-inserted)
@@ -566,8 +569,6 @@
                  )))
       (ins) )))
       
-(defvar *top-node*   nil)
-
 ;; --------------------------------------------------------------------
 ;; Message handlers for verifier nodes
 
@@ -599,7 +600,7 @@
       (setf state-self
             (make-cosi-node
              :id state-id
-             :fn (ac:make-actor (um:dlambda
+             :fn (make-actor (um:dlambda
                    ;; -------------------------------------------
                    ;; Cosi entry points
                    
@@ -712,7 +713,7 @@
     (view-tree *top-node*)
 
     (let ((msg "this is a test"))
-      (ac:with-borrowed-mailbox (mbox)
+      (with-borrowed-mailbox (mbox)
         (send *top-node* :cosi mbox msg)
         (format t "~%Create ~a node multi-signature" n)
         (time (setf *x* (mpcompat:mailbox-read mbox)))

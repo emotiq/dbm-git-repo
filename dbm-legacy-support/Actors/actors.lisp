@@ -357,7 +357,20 @@
 ;; ------------------------------------------
 ;; Create a callback on the function argument
 
-(defun =cont (contfn)
+(defclass callback-function ()
+  ()
+  (:metaclass #+:LISPWORKS clos:funcallable-standard-class
+              #+:ALLEGRO   mop:funcallable-standard-class))
+
+(defmethod initialize-instance :after ((obj callback-function) &key behavior &allow-other-keys)
+  (#+:LISPWORKS clos:set-funcallable-instance-function
+   #+:ALLEGRO   mop:set-funcallable-instance-function
+   obj behavior))
+
+(defmethod =cont ((contfn callback-function))
+  contfn)
+
+(defmethod =cont ((contfn function))
   (if-let (self (current-actor))
       ;;
       ;; If the callback originated from inside an Actor, we ensure
@@ -367,10 +380,11 @@
       ;; Code inside an Actor should only be executing on one thread
       ;; at a time, in order to preserve SMP single-thread semantics.
       ;;
-      (lambda (&rest args)
-        (if (eq self (current-actor))
-            (apply contfn args)
-          (apply 'send self :continuation-{14AFB5F8-D01F-11E7-A1BE-985AEBDA9C2A} contfn args)))
+      (make-instance 'callback-function
+                     :behavior (lambda (&rest args)
+                                 (if (eq self (current-actor))
+                                     (apply contfn args)
+                                   (apply 'send self :continuation-{14AFB5F8-D01F-11E7-A1BE-985AEBDA9C2A} contfn args))))
     ;; else - not originating from inside of an Actor, just return the
     ;; function unchanged
     contfn))
@@ -774,10 +788,15 @@
   `#'(lambda (%sk ,@parms) ,@body))
 
 (defmacro =defun (name parms &body body)
-  (let ((f (symb '= name)))
+  (let* ((f (symb '= name))
+         (has-rest (position '&rest parms))
+         (prefix-parms (subseq parms 0 has-rest))
+         (tail-parm    (when has-rest
+                         (nthcdr (1+ has-rest) parms))))
+    ;; ooftah...
     `(progn
        (defmacro ,name ,parms
-         `(,',f %sk ,,@parms))
+         `(,',f %sk ,,@prefix-parms ,@,@tail-parm))
        (defun ,f (%sk ,@parms) ,@body))))
 
 (defmacro =bind (parms expr &body body)
@@ -909,4 +928,58 @@
   (do-something-with-result lst))
 |#
 
+;; -----------------------------------------------------------------------
 
+(=defun apar-map (node-maker-fn &rest lists)
+  ;;
+  ;; APAR-MAP - an async par-map -- works just like mapcar, but in
+  ;; parallel async, suitable for =bind.
+  ;;
+  ;; The node-maker-fn should take a continuation arg and args
+  ;; selected from each list, as if defined by =defun or =lambda.
+  ;;
+  ;; But rather than passing the =defun name, you *must* use the =name
+  ;; as it is an actual function. The node-maker-fn should return a
+  ;; closure that will be spawned to perform the actual work.
+  ;;
+  ;; The worker function, in the returned closure, should return by
+  ;; =values.
+  ;;
+  ;; The final returned value from APAR-MAP is a list returned to its
+  ;; caller via =values. This is a different callback from the ones
+  ;; fabricated for each worker node, and used for their =values.
+  ;;
+  ;;   (node = Actor, since node is a spawned function).
+  ;;
+  (let ((grps (trn lists)))
+    (if grps
+        (let* ((len   (length grps))
+               (count (list len))
+               (ansv  (make-array len)))
+          (labels ((done (ix ans)
+                     (setf (aref ansv ix) ans)
+                     (when (zerop (mpcompat:atomic-decf (car (the cons count))))
+                       (=values (coerce ansv 'list))))
+                   (callback (ix)
+                     (lambda (ans)
+                       (done ix ans))))
+            (loop for grp in grps
+                  for ix from 0
+                  do
+                  (spawn (apply node-maker-fn (callback ix) grp))
+                  )))
+      ;; else - no nodes
+      (=values nil)
+      )))
+
+#|
+  ;; example...
+(=bind (lst)
+    (apar-map (=lambda (x y)
+                (lambda ()
+                  (=values (list x y))))
+              '(a b c)
+              '(1 2 3))
+  (print lst))
+==> '((a 1) (b 2) (c 3))
+  |#
