@@ -4,6 +4,9 @@
 
 (in-package :edwards-ecc)
 
+;; equiv to #F
+(declaim  (OPTIMIZE (SPEED 3) (SAFETY 0) (FLOAT 0)))
+
 ;; Curve1174:  x^2 + y^2 = 1 + d*x^2*y^2
 ;; curve has order 4 * *ed-r* for field arithmetic over prime field *ed-q*
 ;;    (ed-mul *ed-gen* (* 4 *ed-r*)) -> (0, *ed-c*)
@@ -360,7 +363,6 @@
   (ed-add pt1 (ed-negate pt2)))
 
 (defun naf (k)
-  #F
   (declare (integer k))
   ;; non-adjacent form encoding of integers
   (um:nlet-tail iter ((k k)

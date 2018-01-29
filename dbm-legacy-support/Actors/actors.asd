@@ -52,5 +52,6 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
   :SERIAL T
   :depends-on   ("data-objects"
                  "trivia"
+		 "mpcompat"
                  ))
 

@@ -15,6 +15,7 @@
   :SERIAL T
   :depends-on   (:ironclad
 		 :actors
+                 :core-crypto
                  :lisp-object-encoder
                  :useful-macros))
 

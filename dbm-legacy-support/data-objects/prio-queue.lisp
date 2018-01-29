@@ -415,14 +415,21 @@
   
   (defmethod mailbox-read ((mbox prio-mailbox) &optional wait-reason timeout)
     (with-accessors ((sem  prio-mailbox-sem)) mbox
-      (if timeout
-          (sys:with-timeout ((max timeout 0.1)
-                               (values nil nil))
+      (cond ((null timeout)
              (mp:get-semaphore sem)
              (popq mbox))
-        (progn
-          (mp:get-semaphore sem)
-          (popq mbox)))
-      )))
+            
+            ((not (plusp timeout))
+             (unless (emptyq-p mbox)
+               (sys:with-timeout (0.1 (values nil nil))
+                  (mp:get-semaphore sem)
+                  (popq mbox))))
+            
+            ((plusp timeout)
+             (sys:with-timeout ((max timeout 0.1)
+                                (values nil nil))
+                (mp:get-semaphore sem)
+                (popq mbox)))
+            ))))
 
 ;; ------------------------------------------------------

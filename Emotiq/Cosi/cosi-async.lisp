@@ -222,7 +222,9 @@
 
 (defvar *top-node*              nil) ;; node at top of node-tree
 (defvar *subs-per-node*           9) ;; each node is part of an N+1-way group
-(defvar *default-timeout-period* 40)
+
+;; default-timeout-period needs to be made smarter, based on node height in tree
+(defvar *default-timeout-period* #+:LISPWORKS 40 #+:ALLEGRO 300) ;; good for 1000 nodes on single machine
 
 ;; internal state of each node
 (defstruct (node-state

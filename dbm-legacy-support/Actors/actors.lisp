@@ -557,6 +557,7 @@
 (defvar *executive-counter*  0)   ;; just a serial number on Executive threads
 (defvar *heartbeat-interval* 1)   ;; how often the watchdog should check for system stall
 (defvar *maximum-age*        3)   ;; how long before watchdog should bark
+#|
 (defvar *nbr-execs*               ;; should match the number of CPU Cores
   #+(AND :LISPWORKS :MACOSX)
   (load-time-value
@@ -567,6 +568,8 @@
            4)))
    t)
   #-(AND :LISPWORKS :MACOSX) 4)
+|#
+(defvar *nbr-execs*   16)            ;; for now while we are testing...
 
 ;; ----------------------------------------------------------------
 ;; Ready Queue
@@ -788,8 +791,8 @@
   `#'(lambda (%sk ,@parms) ,@body))
 
 (defmacro =defun (name parms &body body)
-  (let* ((f (symb '= name))
-         (has-rest (position '&rest parms))
+  (let* ((f            (symb '= name))
+         (has-rest     (position '&rest parms))
          (prefix-parms (subseq parms 0 has-rest))
          (tail-parm    (when has-rest
                          (nthcdr (1+ has-rest) parms))))
