@@ -45,6 +45,15 @@
    #F
    (+ tm #.(* 1000000 (encode-universal-time 0 0 0 1 1 1970 0)))))
 
+#+:CLOZURE
+(PROGN
+ (defun get-time-usec ()
+   (ccl::get-internal-real-time))
+
+ (defun adjust-to-standard-universal-time-usec (tm)
+   (declare (integer tm))
+   (+ tm #.(* 1000000 (encode-universal-time 0 0 0 1 1 1970 0)))))
+
 (defun get-universal-time-usec ()
   (adjust-to-standard-universal-time-usec (get-time-usec)))
 

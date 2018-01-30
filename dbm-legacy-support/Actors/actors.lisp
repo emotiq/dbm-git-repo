@@ -655,6 +655,23 @@
 (defun waiting-for-actor-p (proc)
   (getf (mp:process-property-list proc) +wait-property+))
 
+
+#+:CLOZURE
+(defun pop-ready-queue ()
+  ;; while awaiting a function to perform from the Actor ready queue,
+  ;; we indicate our waiting with a process property that can be
+  ;; queried by the system watchdog timer.
+  (let* ((proc  (mpcompat:current-process)))
+    (setf (mpcompat:process-property +wait-property+ proc) t)
+    (let ((ans (mailbox-read *actor-ready-queue*)))
+      (setf (mpcompat:process-property +wait-property+ proc) nil
+            *last-heartbeat* (get-universal-time))
+      ans)))
+
+#+:CLOZURE
+(defun waiting-for-actor-p (proc)
+  (mpcompat:process-property +wait-property+ proc))
+
 ;; ------------------------------------------------------------
 ;; Executive Actions
 

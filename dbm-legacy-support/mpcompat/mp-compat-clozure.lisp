@@ -47,15 +47,38 @@
   "Return the property list for the indicated Lisp process."
   (ccl:process-plist proc))
 
+(defun (setf process-plist) (val proc)
+  (setf (ccl:process-plist proc) val))
+
+(defun get-process-plist-entry (proc key &optional default)
+  "Set the property named by key in the process' property list to val"
+  (getf (process-plist proc) key default))
+
 (defun set-process-plist-entry (proc key val)
-  (setf (getf (ccl:process-plist proc) key) val))
+  (setf (getf (process-plist proc) key) val))
+
+(defun process-property (key &optional proc default)
+  "Get the property named by key in the process' property list"
+  (let ((plist (process-plist (or proc (current-process)))))
+    (getf plist key default)))
+
+(defun (setf process-property) (value key &optional proc default)
+  (let* ((proc  (or proc (current-process)))
+         (plist (process-plist proc)))
+    (setf (getf plist key default) value
+          (process-plist proc) plist)))
 
 ;; --------------------------------------------------------------------------
 
 (defun process-run-function (name flags proc &rest args)
   "Spawn a new Lisp thread and run the indicated function with inital args."
   (declare (ignore flags))
-  (apply #'mp:process-run-function name proc args))
+  (if (find-package :gui)
+    (funcall (intern "BACKGROUND-PROCESS-RUN-FUNCTION" :gui)
+             (list :name name)
+             (lambda ()
+               (apply proc args)))
+    (apply #'mp:process-run-function name proc args)))
 
 ;; --------------------------------------------------------------------------
 
@@ -198,3 +221,14 @@
 (defun generate-uuid ()
   (uuid:make-v4-uuid))
 
+(defmacro compare-and-swap (place before after)
+  (if (and (consp place)
+           (or (eq 'car (car place))
+               (eq 'cdr (car place))))
+      (ecase (car place)
+        (car `(ccl::%store-node-conditional target::cons.car ,(second place) ,before ,after))
+        (cdr `(ccl::%store-node-conditional target::cons.cdr ,(second place) ,before ,after)))
+      `(ccl::conditional-store ,place ,before ,after)))
+
+(defmacro CAS (place old new)
+  `(compare-and-swap ,place ,old ,new))
