@@ -48,7 +48,7 @@
 ;; ----------------------------------------------------------------------
 #||#
 ;; equiv to #F
-(declaim  (OPTIMIZE (SPEED 3) (SAFETY 0) (FLOAT 0)))
+(declaim  (OPTIMIZE (SPEED 3) (SAFETY 0) #+:LISPWORKS (FLOAT 0)))
 
 (defun make-dlambda-dispatcher (fns def)
   (lambda (&rest args)

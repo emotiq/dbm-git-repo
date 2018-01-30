@@ -128,7 +128,7 @@
                                         #+:LISPWORKS
                                         (HARLEQUIN-COMMON-LISP:FIXNUM-SAFETY 3)))
                               (LIST T1 T2))))
-                          (DECLARE (OPTIMIZE (SPEED 3) (SAFETY 0) (FLOAT 0)))
+                          (DECLARE (OPTIMIZE (SPEED 3) (SAFETY 0) #+:LISPWORKS (FLOAT 0)))
                           (BLOCK #14=#:BLOCK20798
                             (LET ((#1=#:ARG20797 (THE CONS (CONS T1 T2))))
                               (DECLARE (DYNAMIC-EXTENT #1#))
@@ -232,7 +232,7 @@
                                   (RETURN-FROM #14# (LIST #26#))))
                               (MATCH-FAIL))))))
     (DECLARE (CONS #27#))
-    (DECLARE (OPTIMIZE (SPEED 3) (SAFETY 0) (FLOAT 0)))
+    (DECLARE (OPTIMIZE (SPEED 3) (SAFETY 0) #+:LISPWORKS (FLOAT 0)))
     (APPLY (CAR #27#) (CDR #27#))) )
 
 ;; ---------------------------------------------------------------------
@@ -310,7 +310,7 @@
                                         #+:LISPWORKS
                                         (HARLEQUIN-COMMON-LISP:FIXNUM-SAFETY 3)))
                               TREE)))
-                          #18=(DECLARE (OPTIMIZE (SPEED 3) (SAFETY 0) (FLOAT 0)))
+                          #18=(DECLARE (OPTIMIZE (SPEED 3) (SAFETY 0) #+:LISPWORKS (FLOAT 0)))
                           (BLOCK #12=#:BLOCK10049
                             (LET ((#1=#:ARG10048 TREE))
                               (DECLARE (DYNAMIC-EXTENT #1#))

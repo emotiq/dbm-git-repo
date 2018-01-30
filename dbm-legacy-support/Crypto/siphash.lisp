@@ -141,7 +141,7 @@
 
 (defun siphash (itemv &key (c 2) (d 4))
   ;; #F
-  (declare (optimize (float 0) (safety 0))
+  (declare (optimize #+:LISPWORKS (float 0) (safety 0))
            (type fixnum c d))
 
   (destructuring-bind (v0 v1 v2 v3) *shkey*

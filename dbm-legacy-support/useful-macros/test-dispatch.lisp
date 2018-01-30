@@ -34,7 +34,7 @@
 (defun aitken (a b c)
   (declare (double-float a b c))
   #F
-  (declare (optimize (float 0)))
+  (declare (optimize #+:LISPWORKS (float 0)))
   (declare (:explain :variables :all-calls :all-calls-with-arg-types))
   (let* ((c-b (- c b))
          (den (- c-b (- b a))))

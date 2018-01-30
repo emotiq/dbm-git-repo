@@ -29,7 +29,7 @@
 (in-package #:bloom-filter)
 
 ;; equiv to #F
-(declaim  (OPTIMIZE (SPEED 3) (SAFETY 0) (FLOAT 0)))
+(declaim  (OPTIMIZE (SPEED 3) (SAFETY 0) #+:LISPWORKS (FLOAT 0)))
 
 ;; -----------------------------------------------------------------------
 

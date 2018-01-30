@@ -22,7 +22,7 @@
 
 (in-package #:mcas)
    
-(declaim (optimize (speed 3) (safety 0) (float 0)))
+(declaim (optimize (speed 3) (safety 0) #+:LISPWORKS (float 0)))
 
 ;; ------------------
 ;; CCAS - Conditional CAS
