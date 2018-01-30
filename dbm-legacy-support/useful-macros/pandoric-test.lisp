@@ -1,5 +1,9 @@
 
+#-:CLOZURE
 (in-package #:user)
+
+#+:CLOZURE
+(in-package #:cl-user)
 
 (defun make-stats-counter
        (&key (count 0)

@@ -1,5 +1,9 @@
 
+#-:CLOZURE
 (in-package #:user)
+
+#+:CLOZURE
+(in-package #:cl-user)
 
 (asdf:defsystem "core-crypto"
   :description "core-crypto: core cryptography functions"

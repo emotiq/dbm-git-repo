@@ -7,14 +7,14 @@
 
 ;; -----------------------------------------------------------
 
-#-:OPENMCL
+#-:CLOZURE
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (defconstant +empty+      (gensym))
   (defconstant +empty-cell+ (list +empty+)))
 
-#+:openmcl
+#+:CLOZURE
 (defconstant +empty+      (gensym))
-#+:openmcl
+#+:CLOZURE
 (defconstant +empty-cell+ (list +empty+))
 
 (defun cache (fn &key (test #'equal))

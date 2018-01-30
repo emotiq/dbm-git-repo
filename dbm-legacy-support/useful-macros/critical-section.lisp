@@ -50,7 +50,7 @@
                clauses)
      ))
 
-#+:OPENMCL
+#+:CLOZURE
 (defmacro! defmonitor (clauses)
   `(let* ((,g!lock (ccl:make-lock))
           (,g!lam  (lambda (&rest ,g!args)

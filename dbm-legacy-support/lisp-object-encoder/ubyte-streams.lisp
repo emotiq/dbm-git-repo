@@ -31,7 +31,7 @@
 ;; ------------------------------------------------------
 
 #+:LISPWORKS
-(defclass ubyte-output-stream (stream:fundamental-binary-output-stream
+(defclass ubyte-output-stream (stream: fundamental-binary-output-stream
                                ubyte-stream)
   ((arr  :accessor uos-arr
          :initarg  :buffer
@@ -44,13 +44,20 @@
          :initarg  :buffer
          :initform (mgdbuf:make-buffer 1024))))
 
+#+:CLOZURE
+(defclass ubyte-output-stream (stream:fundamental-binary-output-stream
+                               ubyte-stream)
+  ((arr  :accessor uos-arr
+         :initarg  :buffer
+         :initform (mgdbuf:make-buffer 1024))))
+
 (defun make-ubyte-output-stream (&optional use-buffer)
   (if use-buffer
       (make-instance 'ubyte-output-stream
                      :buffer use-buffer)
     (make-instance 'ubyte-output-stream)))
 
-#+:LISPWORKS
+#+(or :LISPWORKS :CLOZURE)
 (defmethod stream:stream-write-byte ((stream ubyte-output-stream) val)
   (vector-push-extend val (uos-arr stream))
   val)
@@ -84,7 +91,7 @@
 
 ;; ------------------------------------------------------
 
-#+:LISPWORKS
+#+(or :LISPWORKS :CLOZURE)
 (defclass ubyte-input-stream (stream:fundamental-binary-input-stream 
                               ubyte-stream)
   ((arr    :reader   uis-arr    :initarg :arr)
@@ -109,7 +116,7 @@
                  :end    end
                  :reader reader))
 
-#+:LISPWORKS
+#+(or :LISPWORKS :CLOZURE)
 (defmethod stream:stream-read-byte ((stream ubyte-input-stream))
   (with-accessors ((arr    uis-arr)
                    (ix     uis-ix )
