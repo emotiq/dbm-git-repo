@@ -67,7 +67,7 @@
                      (copy-seq salt)
                    (ctr-drbg 128)))
 
-         (cipher (list (make-ecb-cipher :aesx    (kdf 256 :aesx    key nonce salt))
+         (cipher (list (make-ecb-cipher :aes     (kdf 256 :aes     key nonce salt))
                        (make-ecb-cipher :twofish (kdf 256 :twofish key nonce salt))))
 
          (kmul   (let ((vec (make-cipher-block)))

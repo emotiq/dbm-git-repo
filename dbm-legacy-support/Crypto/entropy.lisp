@@ -69,7 +69,7 @@
                (nb     (file-length fp))
                (buf    (make-ub-array nb))
                (bits   (ctr-drbg 384))
-               (cipher (ironclad:make-cipher :aesx
+               (cipher (ironclad:make-cipher :aes
                                              :key  (subseq bits 0 32)
                                              :mode :cbc
                                              :initialization-vector (subseq bits 32))))
@@ -103,7 +103,7 @@
                (nb     (file-length fp))
                (buf    (make-ub-array nb))
                (bits   (ctr-drbg 384))
-               (cipher (ironclad:make-cipher :aesx
+               (cipher (ironclad:make-cipher :aes
                                              :key  (subseq bits 0 32)
                                              :mode :cbc
                                              :initialization-vector (subseq bits 32))))
