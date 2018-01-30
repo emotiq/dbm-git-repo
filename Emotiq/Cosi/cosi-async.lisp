@@ -437,11 +437,12 @@
     (recv
       ((list* :commit ans)
        (=values ans))
-
+      #|
       :TIMEOUT timeout
       :ON-TIMEOUT (progn
                     (become 'do-nothing)
                     (=values nil))
+      |#
       )))
 
 (defun node-make-cosi-commitment (state reply-to seq-id msg)
@@ -487,11 +488,12 @@
       ((list (or :missing-node
                  :invalid-commitment))
        (=values nil))
-
+      #|
       :TIMEOUT timeout
       :ON-TIMEOUT (progn
                     (become 'do-nothing)
                     (=values nil))
+      |#
       )))
 
 (defun node-compute-signature (state reply-to seq-id c)
@@ -589,12 +591,13 @@
 
                                 ((list :node-not-inserted)
                                  (try (cdr nodes)))
-
+				#|
                                 :TIMEOUT state-timeout
                                 :ON-TIMEOUT
                                 (progn
                                   (mark-node-no-response state (car nodes))
                                   (try (cdr nodes)))
+				|#
                                 )))))
                  (try state-subs)))
               
@@ -752,24 +755,27 @@
 (defvar *x* nil) ;; saved result for inspection
 
 (defun tst (&optional (n 100))
-    (organic-build-tree n)
+  (ac::kill-executives)
+  (setf ac::*depth* 0)
+  (organic-build-tree n)
   
-    (format t "~%Nbr Nodes: ~A"
-            (ask *top-node* :count-nodes))
-
-    #+:LISPWORKS
-    (view-tree *top-node*)
-
-    (let ((msg "this is a test"))
-      (with-borrowed-mailbox (mbox)
-        (send *top-node* :cosi mbox msg)
-        (format t "~%Create ~a node multi-signature" n)
-        (time (setf *x* (mpcompat:mailbox-read mbox)))
-
-        (print "Verify signature")
-        (time (ask *top-node* :validate msg (third *x*)))
-        ))
-    )
+  (format t "~%Nbr Nodes: ~A"
+	  (ask *top-node* :count-nodes))
+  
+  #+:LISPWORKS
+  (view-tree *top-node*)
+  
+  (let ((msg "this is a test"))
+    (with-borrowed-mailbox (mbox)
+      (send *top-node* :cosi mbox msg)
+      (format t "~%Create ~a node multi-signature" n)
+      (time (setf *x* (mpcompat:mailbox-read mbox)))
+      
+      (print "Verify signature")
+      (list :depth ac::*depth* 
+	    (time (ask *top-node* :validate msg (third *x*))))
+      ))
+  )
 
 #|
 (ac::kill-executives)
