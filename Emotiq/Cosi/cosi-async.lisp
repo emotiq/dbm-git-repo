@@ -286,46 +286,6 @@
   fn
   id)
 
-;; --------------------------------------------------------------- 
-; A hash-table service. We need this for Allegro because (apparently)
-; hashtables are not safe for SMP access. They are safe in LW unless
-; you create them explicitly for :SINGLE-THREAD.
-#|
-(defun make-ht-handler () 
-  (make-actor
-   (let ((tbl (make-hash-table))) 
-     (dlam:dlambda
-       (:get (k &optional def) 
-        (gethash k tbl def)) 
-       (:set (k v) 
-        (setf (gethash k tbl) v)) 
-       (:map (fn) 
-	(maphash fn tbl)) 
-       (:clr () 
-        (clrhash tbl))
-       (:insp ()
-        (inspect tbl))
-       ))))
-
-(defun getht (k tbl &optional def)
-  (ac:ask tbl :get k def))
-
-(defun setht (k tbl v)
-  (ac:send tbl :set k v)
-  v)
-
-(defsetf getht setht)
-
-(defun clrht (tbl)
-  (ac:send tbl :clr))
-
-(defun mapht (fn tbl)
-  (ac:send tbl :map fn))
-
-(defun insp (tbl)
-  (ac:send tbl :insp))
-|#
-
 ;; -----------------------------------------------------------
 
 (defparameter *cosi-nodes* (maps:empty)) ;; a hashtable linking node ID with simulator closure
