@@ -2,7 +2,7 @@
 ;; DM/RAL  02/09
 ;; ------------------------------------------------------------------
 
-(in-package :user)
+(in-package :cl-user)
 
 (defpackage #:ref
   (:use #:common-lisp)
@@ -22,7 +22,7 @@
 
 (defpackage #:priq
   (:use #:common-lisp)
-  (:import-from :mpcompat
+  #-OPENMCL (:import-from :mpcompat
    :CAS)
   (:export
    #:unsafe-lifo
