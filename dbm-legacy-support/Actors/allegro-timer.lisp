@@ -3,6 +3,19 @@
 ;; DM/Emotiq  01/18
 ;; ------------------------------------------------------------------
 
+#| -- placed into packages.lisp...
+(defpackage :allegro-timer
+  (:nicknames :atimer)
+  (:use :common-lisp)
+  (:export
+   :timer
+   :make-timer
+   :schedule-timer
+   :schedule-timer-relative
+   :unschedule-timer
+   ))
+|#
+
 (in-package :allegro-timer)
 
 (defvar *timeout-queue*  (priq:make-prio-mailbox))

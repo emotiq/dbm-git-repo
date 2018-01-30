@@ -224,7 +224,7 @@
 (defvar *subs-per-node*           9) ;; each node is part of an N+1-way group
 
 ;; default-timeout-period needs to be made smarter, based on node height in tree
-(defvar *default-timeout-period* #+:LISPWORKS 40 #+:ALLEGRO 300) ;; good for 1000 nodes on single machine
+(defvar *default-timeout-period* #+:LISPWORKS 40 #+:ALLEGRO 400) ;; good for 1000 nodes on single machine
 
 ;; internal state of each node
 (defstruct (node-state
@@ -399,9 +399,7 @@
        (=values ans))
 
       :TIMEOUT timeout
-      :ON-TIMEOUT (progn
-                    (become 'do-nothing)
-                    (=values nil))
+      :ON-TIMEOUT (=values nil)
       )))
 
 (defun node-make-cosi-commitment (state reply-to seq-id msg)
@@ -449,9 +447,7 @@
        (=values nil))
 
       :TIMEOUT timeout
-      :ON-TIMEOUT (progn
-                    (become 'do-nothing)
-                    (=values nil))
+      :ON-TIMEOUT (=values nil)
       )))
 
 (defun node-compute-signature (state reply-to seq-id c)
