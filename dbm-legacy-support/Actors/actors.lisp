@@ -647,11 +647,13 @@
     ))
 
 #+:ALLEGRO
-(defun #1=allegro-check-sufficient-execs ()
-  (loop
-    (sleep *heartbeat-interval*)
-    (when (check-sufficient-execs)
-      (return-from #1#))))
+(let ((cnt 0))
+  (defun #1=allegro-check-sufficient-execs ()
+    (loop
+      (sleep *heartbeat-interval*)
+      (format t "~%wd: ~A (~A)" (incf cnt) (priq:countq *actor-ready-queue*))
+      (when (check-sufficient-execs)
+	(return-from #1#)))))
 
 #|
 (defun test-stall ()

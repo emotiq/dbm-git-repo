@@ -9,6 +9,8 @@
 
 ;; --------------------------------------------------
 (in-package #:mp-compatibility)
+;; equiv to #F
+(declaim  (OPTIMIZE (SPEED 3) (SAFETY 0) (FLOAT 0)))
 ;; --------------------------------------------------
 ;; Compatibility Layer
 

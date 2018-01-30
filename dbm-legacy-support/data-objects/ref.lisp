@@ -45,10 +45,7 @@
   (car (the cons (ref-cell ref))))
 
 (defmethod cas ((ref car-ref) old new)
-  #+:LISPWORKS
-  (system:compare-and-swap (car (the cons (ref-cell ref))) old new)
-  #+:ALLEGRO
-  (excl:atomic-conditional-setf (car (the cons (ref-cell ref))) new old))
+  (mpcompat:CAS (car (the cons (ref-cell ref))) old new))
 
 (defmethod raw-car-ref ((cell cons))
   (make-instance 'car-ref
@@ -112,10 +109,7 @@
   (cdr (the cons (ref-cell ref))))
 
 (defmethod cas ((ref cdr-ref) old new)
-  #+:LISPWORKS
-  (system:compare-and-swap (cdr (the cons (ref-cell ref))) old new)
-  #+:ALLEGRO
-  (excl:atomic-conditional-setf (cdr (the cons (ref-cell ref))) new old))
+  (mpcompat:CAS (cdr (the cons (ref-cell ref))) old new))
 
 
 ;; -----------------------------------------

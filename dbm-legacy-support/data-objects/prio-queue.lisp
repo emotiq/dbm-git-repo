@@ -299,6 +299,9 @@
 
 (defmethod emptyq-p ((q unsafe-priq))
   (maps:is-empty (unsafe-priq-ref q)))
+
+(defmethod countq ((q unsafe-priq))
+  (sets:cardinal (unsafe-priq-ref q)))
           
 ;; ------------------------------------------------------------------
 ;; PRIQ - Priority FIFO Queue - safe for sharing
@@ -386,7 +389,7 @@
   
   (defmethod mailbox-not-empty-p ((mbox prio-mailbox))
     (not (mailbox-empty-p mbox)))
-  
+
   (defmethod mailbox-read ((mbox prio-mailbox) &optional wait-reason timeout)
     (with-accessors ((sem  prio-mailbox-sem)) mbox
       (and (mp:semaphore-acquire sem
@@ -420,6 +423,8 @@
              (popq mbox))
             
             ((not (plusp timeout))
+	     ;; a zero timeout means grab mail quickly, if available,
+	     ;; otherwise, return immediately
              (unless (emptyq-p mbox)
                (sys:with-timeout (0.1 (values nil nil))
                   (mp:get-semaphore sem)

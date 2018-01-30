@@ -86,5 +86,7 @@
    #:generate-uuid
    #:critical
    #:spin-critical
+
+   #:CAS
    ))
 

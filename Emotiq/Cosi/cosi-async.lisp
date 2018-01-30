@@ -286,10 +286,52 @@
   fn
   id)
 
-(defvar *cosi-nodes* (make-hash-table)) ;; a hashtable linking node ID with simulator closure
+;; --------------------------------------------------------------- 
+; A hash-table service. We need this for Allegro because (apparently)
+; hashtables are not safe for SMP access. They are safe in LW unless
+; you create them explicitly for :SINGLE-THREAD.
+#|
+(defun make-ht-handler () 
+  (make-actor
+   (let ((tbl (make-hash-table))) 
+     (dlam:dlambda
+       (:get (k &optional def) 
+        (gethash k tbl def)) 
+       (:set (k v) 
+        (setf (gethash k tbl) v)) 
+       (:map (fn) 
+	(maphash fn tbl)) 
+       (:clr () 
+        (clrhash tbl))
+       (:insp ()
+        (inspect tbl))
+       ))))
+
+(defun getht (k tbl &optional def)
+  (ac:ask tbl :get k def))
+
+(defun setht (k tbl v)
+  (ac:send tbl :set k v)
+  v)
+
+(defsetf getht setht)
+
+(defun clrht (tbl)
+  (ac:send tbl :clr))
+
+(defun mapht (fn tbl)
+  (ac:send tbl :map fn))
+
+(defun insp (tbl)
+  (ac:send tbl :insp))
+|#
+
+;; -----------------------------------------------------------
+
+(defparameter *cosi-nodes* (maps:empty)) ;; a hashtable linking node ID with simulator closure
 
 (defun node-fn (id)
-  (cosi-node-fn (gethash id *cosi-nodes*)))
+  (cosi-node-fn (maps:find id *cosi-nodes*)))
 
 ;; -----------------------------------------------------------
 
@@ -297,7 +339,7 @@
   (apply 'ac:ask (cosi-node-fn node) msg))
 
 (defmethod ask ((node symbol) &rest msg)
-  (apply 'ask (gethash node *cosi-nodes*) msg))
+  (apply 'ask (maps:find node *cosi-nodes*) msg))
 
 ;; -----------------------------------------------------------
 
@@ -348,24 +390,27 @@
 
 ;; ----------------------------------------------------------------------
 
-(defvar *cosi-pkeys* (make-hash-table)) ;; previously verified public keys
+(defparameter *cosi-pkeys* (maps:empty)) ;; previously verified public keys
 
 (defun validate-public-keys ()
   ;; Each verifier node maintains a cache of previously verified
   ;; public keys in *COSI-PKEYS*. If we have already seen the pkey in
   ;; the triple and verified it, we bypass re-verification and use the
   ;; cached value.
-  (maphash (lambda (id node)
-             (declare (ignore node))
-             (destructuring-bind ((r c pcmpr))
-                 (ask id :public-key nil)
-               (let* ((pt   (ed-decompress-pt pcmpr)) ;; node's public key
-                      (vpt  (ed-add (ed-nth-pt r)    ;; validate with NIZKP 
-                                    (ed-mul pt c))))
-                 (assert (= c (hash-pt-pt vpt pt)))
-                 (setf (gethash id *cosi-pkeys*) pt)) ;; return decompressed EC point
-               ))
-           *cosi-nodes*))
+  (maps:iter
+   (lambda (id node)
+     (declare (ignore node))
+     (destructuring-bind ((r c pcmpr))
+	 (ask id :public-key nil)
+       (let* ((pt   (ed-decompress-pt pcmpr)) ;; node's public key
+	      (vpt  (ed-add (ed-nth-pt r)    ;; validate with NIZKP 
+			    (ed-mul pt c))))
+	 (assert (= c (hash-pt-pt vpt pt)))
+         (loop for old = *cosi-pkeys*
+               until (mpcompat:cas *cosi-pkeys* old
+                                   (maps:add id pt old)))
+         )))
+   *cosi-nodes*))
 
 (defun node-reset (state seq-id)
   ;; maybe we should do sanity checking on seq-id?
@@ -579,7 +624,7 @@
   (with-node-state state
     (destructuring-bind (c r ids) sig
       (let* ((tkey (reduce (lambda (ans id)
-                             (let ((pkey (gethash id *cosi-pkeys*)))
+                             (let ((pkey (maps:find id *cosi-pkeys*)))
                                (ed-add ans pkey)))
                            ids
                            :initial-value (ed-neutral-point)))
@@ -654,15 +699,16 @@
                       (error "unknown message: ~A" msg))
                    )))
             ;; register ourself with the ASK cross reference table
-            (gethash state-id *cosi-nodes*) state-self))))
+            *cosi-nodes* (maps:add state-id state-self *cosi-nodes*))
+      state-self)))
 
 #||#
 ;; ----------------------------------------------------------------------------
 ;; Test Code
 
 (defun organic-build-tree (&optional (n 1000))
-  (clrhash *cosi-nodes*)
-  (clrhash *cosi-pkeys*)
+  (setf *cosi-nodes* (maps:empty))
+  (setf *cosi-pkeys* (maps:empty))
   (print "Bulding cosigner node tree")
   (let ((all (time (loop repeat n collect (make-node)))))
     (setf *top-node* (cosi-node-id (car all)))

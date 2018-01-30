@@ -10,7 +10,9 @@
   :version     "1.0"
   :author      "D.McClain <dbm@emotiq.ch>"
   :license     "Copyright (c) 2018 by Emotiq, A.G. License terms apply."
-  :components  ((:file "cosi-async")
+  :components  (
+		(:file "cosi-async")
+		;; (:file "cosi")
                 )
   :SERIAL T
   :depends-on   (:ironclad
