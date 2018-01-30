@@ -399,11 +399,14 @@
 (defclass callback-function ()
   ()
   (:metaclass #+:LISPWORKS clos:funcallable-standard-class
-              #+:ALLEGRO   mop:funcallable-standard-class))
+              #+:ALLEGRO   mop:funcallable-standard-class
+              #+:CLOZURE   ccl:funcallable-standard-class
+              ))
 
 (defmethod initialize-instance :after ((obj callback-function) &key behavior &allow-other-keys)
   (#+:LISPWORKS clos:set-funcallable-instance-function
    #+:ALLEGRO   mop:set-funcallable-instance-function
+   #+:CLOZURE   ccl:set-funcallable-instance-function
    obj behavior))
 
 (defmethod =cont ((contfn callback-function))
@@ -465,6 +468,10 @@
 (defmethod send ((mbox mp:queue) &rest message)
   (mpcompat:mailbox-send mbox message))
 
+#+:CLOZURE
+(defmethod send ((mbox mpcompat::queue) &rest message)
+  (mpcompat:mailbox-send mbox message))
+
 (defmethod send ((mbox prio-mailbox) &rest message)
   (mailbox-send mbox message))
 
@@ -508,7 +515,7 @@
   (defun release-mailbox (mbox)
     (sys:atomic-push mbox (car queue))))
 
-#+:ALLEGRO
+#+(or :ALLEGRO :CLOZURE)
 (let ((queue (list nil))
       (lock  (mpcompat:make-lock)))
 
@@ -606,7 +613,9 @@
                 ans)
            4)))
    t)
-  #-(AND :LISPWORKS :MACOSX) 4)
+  #+:CLOZURE
+  (ccl:cpu-count)
+  #-(or :CLOZURE (AND :LISPWORKS :MACOSX)) 4)
 #||#
 ;; (defvar *nbr-execs*   16)            ;; for now while we are testing...
 
