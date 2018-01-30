@@ -1,14 +1,7 @@
-
-(defpackage :allegro-timer
-  (:nicknames :atimer)
-  (:use :common-lisp)
-  (:export
-   :timer
-   :make-timer
-   :schedule-timer
-   :schedule-timer-relative
-   :unschedule-timer
-   ))
+;; allegro-timer.lisp -- "Proper" timers for ACL
+;;
+;; DM/Emotiq  01/18
+;; ------------------------------------------------------------------
 
 (in-package :allegro-timer)
 

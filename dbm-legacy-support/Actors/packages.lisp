@@ -5,6 +5,18 @@
 
 (in-package :CL-USER)
 
+#+:ALLEGRO
+(defpackage :allegro-timer
+  (:nicknames :atimer)
+  (:use :common-lisp)
+  (:export
+   :timer
+   :make-timer
+   :schedule-timer
+   :schedule-timer-relative
+   :unschedule-timer
+   ))
+
 (defpackage #:actors
   (:use #:common-lisp)
   (:nicknames #:ac)
