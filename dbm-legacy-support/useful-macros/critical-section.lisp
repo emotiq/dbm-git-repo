@@ -50,6 +50,21 @@
                clauses)
      ))
 
+#+:OPENMCL
+(defmacro! defmonitor (clauses)
+  `(let* ((,g!lock (ccl:make-lock))
+          (,g!lam  (lambda (&rest ,g!args)
+                     (ccl:with-lock-grabbed (,g!lock)
+                       (dcase ,g!args
+                         ,@clauses)))
+                   ))
+     ,@(mapcar (lambda (clause)
+                 (let ((fname (first clause)))
+                   `(defun ,fname (&rest ,g!fargs)
+                      (apply ,g!lam ',fname ,g!fargs))))
+               clauses)
+     ))
+
 ;; ----------------------------------------------------------
 
 #+:LISPWORKS

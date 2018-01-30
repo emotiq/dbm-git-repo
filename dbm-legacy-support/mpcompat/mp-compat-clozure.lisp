@@ -14,15 +14,16 @@
 
 (defun current-process ()
   "Get the current Lisp process."
-  mp:*current-process*)
+  ccl:*current-process*)
 
 ;; --------------------------------------------------------------------------
 
 (defun process-name (proc)
-  (mp:process-name proc))
+  (ccl:process-name proc))
+
 
 (defun set-process-name (proc name)
-  (setf (mp:process-name proc) name))
+  (setf (ccl:process-name proc) name))
 
 ;; --------------------------------------------------------------------------
 #|
@@ -52,25 +53,25 @@
 (defun process-run-function (name flags proc &rest args)
   "Spawn a new Lisp thread and run the indicated function with inital args."
   (declare (ignore flags))
-  (apply #'mp:process-run-function name proc args))
+  (apply #'ccl:process-run-function name proc args))
 
 ;; --------------------------------------------------------------------------
 
 (defun process-kill (proc)
   "Kill the indicated Lisp process."
-  (mp:process-kill proc))
+  (ccl:process-kill proc))
 
 ;; --------------------------------------------------------------------------
 
 (defun process-interrupt (proc fn &rest args)
   "Interrupt the indicated Lisp process to have it perform a function."
-  (apply #'mp:process-interrupt proc fn args))
+  (apply #'ccl:process-interrupt proc fn args))
 
 ;; --------------------------------------------------------------------------
 
 (defmacro without-preemption (&body body)
   "Perform the body forms without preemption."
-  `(mp:without-interrupts ,@body)) ;; not quite, but as close as we can get...
+  `(ccl:without-interrupts ,@body)) ;; not quite, but as close as we can get...
 
 ;; --------------------------------------------------------------------------
 ;; --------------------------------------------------------------------------
@@ -78,7 +79,7 @@
 (defun make-lock (&key name important-p (safep t))
   "Make a Lisp lock."
   (declare (ignorable important-p safep))
-  (mp:make-lock name))
+  (ccl:make-lock name))
 
 ;; --------------------------------------------------------------------------
 
@@ -95,8 +96,8 @@
        (do-grab-lock-with-timeout lock whostate timeout)
        (unwind-protect
 	    (funcall fn)
-	 (mp:release-lock lock)))
-      (mp:with-lock-grabbed (lock) (funcall fn))
+	 (process-unlock lock)))
+      (ccl:with-lock-grabbed (lock) (funcall fn))
       ))
 
 ;; --------------------------------------------------------------------------
@@ -113,53 +114,82 @@
 
 (defun do-grab-lock-with-timeout (lock whostate timeout)
   (if timeout
-       (or (mp:try-lock lock)
-	   (mp:process-wait-with-timeout whostate
-					 (round
-					  (* timeout mp:*ticks-per-second*))
-					 #'mp:try-lock (list lock)))
-       (mp:grab-lock lock)))
+       (or (ccl:try-lock lock)
+	   (process-wait-with-timeout whostate
+                                      timeout
+                                      #'ccl:try-lock (list lock)))
+       (ccl:grab-lock lock)))
 
 ;; --------------------------------------------------------------------------
 
 (defun process-unlock (lock)
-  (mp:release-lock lock))
+  (ccl:release-lock lock))
 
 ;; --------------------------------------------------------------------------
+
+(defclass queue ()
+  ((lock :initarg :lock :initform (ccl:make-lock) :reader get-lock)
+   (semaphore :initarg :semaphore :initform (ccl:make-semaphore) :accessor get-semaphore)
+   (head :initarg :head :initarg :next-out :initform nil :accessor head :accessor next-out)
+   (tail :initarg :tail :initarg :next-in :initform nil :accessor tail :accessor next-in)))
+
+(defmethod enqueue ((q queue) item)
+  "Enqueues new element at tail of queue."
+  (ccl:with-lock-grabbed ((get-lock q))
+    (if (null (head q))
+      (setf (tail q) (setf (head q) (cons item nil)))
+      (setf (cdr (tail q)) (cons item nil)
+            (tail q) (cdr (tail q))))
+    (ccl:signal-semaphore (get-semaphore q))
+    (values item t)))
+
+(defmethod dequeue ((q queue) &optional timeout)
+  ; let OS check to see if anything's in the queue. More efficient to not take lock until after this happens.
+  (let ((expired nil))
+    (ccl:with-interrupts-enabled
+        (if timeout
+            (setf expired (not (ccl:timed-wait-on-semaphore (get-semaphore q) timeout)))
+            (ccl:wait-on-semaphore (get-semaphore q))))
+    (if expired
+        (values nil nil)
+        (ccl:with-lock-grabbed ((get-lock q))
+          (if (null (head q))
+              (values nil nil) ; this can only happen if some other process emptied the queue
+              ;  after we checked semaphore. Unlikely, but possible.
+              (values (pop (head q)) t))))))
 
 (defun make-mailbox (&key size)
   "Make a Lisp mailbox."
   (declare (ignorable size))
-  (mrmb:create))
+  (make-instance 'queue))
 
 ;; --------------------------------------------------------------------------
 
 (defun mailbox-send (mbox msg)
   "Send a message to a Lisp mailbox."
-  (mrmb:send msg mbox))
+  (enqueue mbox msg))
 
 ;; --------------------------------------------------------------------------
 
 (defun mailbox-read (mbox &optional timeout)
-  (mrmb:receive mbox timeout))
+  (when timeout (setf timeout (coerce timeout 'float)))
+  (dequeue mbox timeout))
 
 ;; --------------------------------------------------------------------------
 
 (defun mailbox-empty? (mbox)
   "Check if the Lisp mailbox is empty. Return generalized T/F."
-  (mrmb:is-empty mbox))
+  (null (head mbox)))
 
 ;; --------------------------------------------------------------------------
 
 (defun process-wait (wait-reason wait-fn &rest wait-args)
-  (apply #'mp:process-wait wait-reason wait-fn wait-args))
+  (apply #'ccl::process-wait wait-reason wait-fn wait-args))
 
 ;; --------------------------------------------------------------------------
 
 (defun process-wait-with-timeout (wait-reason timeout wait-fn &rest wait-args)
-  (apply #'mp:process-wait-with-timeout wait-reason
-         (and timeout (round (* timeout mp:*ticks-per-second*)))
-         wait-fn wait-args))
+  (apply #'ccl:process-wait-with-timeout wait-reason (round (* ccl::*ticks-per-second* timeout)) wait-fn wait-args))
 
 ;; --------------------------------------------------------------------------
 

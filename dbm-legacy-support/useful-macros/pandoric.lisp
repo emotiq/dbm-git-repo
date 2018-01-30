@@ -15,6 +15,7 @@
 ;; thread. Compiled code always works properly because the symbols are
 ;; fully resolved at compile time, even for stashed bits of code.
 
+#+:LISPWORKS
 (defun in-eval-mode-p (env)
   ;; return true if we are in the outer global environment
   (or (null env)
@@ -25,6 +26,11 @@
                 compiler::fenv
                 compiler::tenv
                 compiler::venv))))
+
+#-:LISPWORKS
+(defun in-eval-mode-p (env)
+  ;; return true if we are in the outer global environment
+  t)
 
 (defun ensure-thread-eval (form env)
   (if (in-eval-mode-p env)

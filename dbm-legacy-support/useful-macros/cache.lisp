@@ -7,9 +7,15 @@
 
 ;; -----------------------------------------------------------
 
+#-:OPENMCL
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (defconstant +empty+      (gensym))
   (defconstant +empty-cell+ (list +empty+)))
+
+#+:openmcl
+(defconstant +empty+      (gensym))
+#+:openmcl
+(defconstant +empty-cell+ (list +empty+))
 
 (defun cache (fn &key (test #'equal))
   ;; provide a simple 2-way associative cache on function fn

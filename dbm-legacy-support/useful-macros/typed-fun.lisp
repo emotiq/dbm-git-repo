@@ -3,6 +3,7 @@
 
 ;; ------------------------------------------------------
 
+#+:LISPWORKS
 (defmacro! def-typed-fn (type-name args &body body &environment env)
   (let ((maker-name (intern (concatenate 'string (string :MAKE-)
                                          (string type-name)))))
