@@ -1,11 +1,7 @@
 ;; ecc-package.lisp
 ;; -----------------------------------
 
-#-:CLOZURE
-(in-package #:user)
-
-#+:CLOZURE
-(in-package #:cl-user)
+(in-package :cl-user)
 
 (defpackage :crypto-mod-math
   (:use :common-lisp)

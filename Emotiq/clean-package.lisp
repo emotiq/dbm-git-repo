@@ -1,5 +1,5 @@
 
-(in-package :user)
+(in-package :cl-user)
 
 (defun clean-package (package)
   (let ((pkg (find-package package)))

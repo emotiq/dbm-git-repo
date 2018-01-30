@@ -3,7 +3,7 @@
 ;; DM/Emotiq  01/18
 ;; -----------------------------------------------------------
 
-(in-package :user)
+(in-package :cl-user)
 
 (asdf:defsystem "cosi"
   :description "Cosi: Authenticated multi-signatures in Lisp"

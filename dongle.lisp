@@ -1,5 +1,5 @@
 
-(in-package :user)
+(in-package :cl-user)
 
 ;; ----------------------------------------------
 (defun has-super-user-dongle-p ()

@@ -3,7 +3,7 @@
 ;; DM/Emotiq  01/18
 ;; -----------------------------------------------------------
 
-(in-package :user)
+(in-package :cl-user)
 
 (asdf:defsystem "ads-clos"
   :description "ADS-CLOS: CLOS-Based Authenticated Data Structures"

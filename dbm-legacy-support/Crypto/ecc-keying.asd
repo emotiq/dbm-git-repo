@@ -1,5 +1,5 @@
 
-(in-package #:user)
+(in-package :cl-user)
 
 (asdf:defsystem "ecc-keying"
   :description "ecc-keying: encryption based on NIST B-571 Elliptic Curve Cryptography"

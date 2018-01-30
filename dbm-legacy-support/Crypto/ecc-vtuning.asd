@@ -1,5 +1,5 @@
 
-(in-package #:user)
+(in-package :cl-user)
 
 (asdf:defsystem "ecc-vtuning"
   :description "ecc-vtuning: encryption for VTuning installations"

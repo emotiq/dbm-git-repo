@@ -1,5 +1,5 @@
 
-(in-package #:user)
+(in-package :cl-user)
 
 (asdf:defsystem "alt-ecc-decrypt-license"
   :description "alt-ecc-decrypt-license: decryption based on NIST B-571 Elliptic Curve Cryptography"

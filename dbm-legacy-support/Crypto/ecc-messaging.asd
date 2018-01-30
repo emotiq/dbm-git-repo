@@ -1,5 +1,5 @@
 
-(in-package #:user)
+(in-package :cl-user)
 
 (asdf:defsystem "ecc-messaging"
   :description "ecc-messaging: ECC encryption / decryption for messaging"
