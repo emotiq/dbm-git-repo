@@ -15,7 +15,7 @@
 
 (um:defmonitor
     ((get-blinder (m)
-		  (or ;; 0 ;; no blinding...
+		  (or 0 ;; no blinding...
 		   (gethash m *blinders*)
 		   (setf (gethash m *blinders*) (create-blinder m))))
 

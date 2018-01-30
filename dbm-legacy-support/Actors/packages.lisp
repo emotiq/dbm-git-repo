@@ -42,6 +42,16 @@
    #:<shared-plist>
    #:get-kv
    #:symb)
+  #+:LISPWORKS
+  (:import-from :mp
+   :make-timer
+   :schedule-timer-relative
+   :unschedule-timer)
+  #+:ALLEGRO
+  (:import-from :atimer
+   :make-timer
+   :schedule-timer-relative
+   :unschedule-timer)
   (:export
    #:*nbr-execs*
    #:actor
