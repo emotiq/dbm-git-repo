@@ -5,6 +5,18 @@
 
 (in-package :CL-USER)
 
+#+:ALLEGRO
+(defpackage :allegro-timer
+  (:nicknames :atimer)
+  (:use :common-lisp)
+  (:export
+   :timer
+   :make-timer
+   :schedule-timer
+   :schedule-timer-relative
+   :unschedule-timer
+   ))
+
 (defpackage #:actors
   (:use #:common-lisp)
   (:nicknames #:ac)
@@ -42,6 +54,16 @@
    #:<shared-plist>
    #:get-kv
    #:symb)
+  #+:LISPWORKS
+  (:import-from :mp
+   :make-timer
+   :schedule-timer-relative
+   :unschedule-timer)
+  #+:ALLEGRO
+  (:import-from :atimer
+   :make-timer
+   :schedule-timer-relative
+   :unschedule-timer)
   (:export
    #:*nbr-execs*
    #:actor

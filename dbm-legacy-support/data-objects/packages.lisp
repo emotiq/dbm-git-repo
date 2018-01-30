@@ -45,6 +45,7 @@
    #:contents
    #:findq
    #:lastq
+   #:countq
    
    #:make-prio-mailbox
    #:mailbox-send

@@ -533,6 +533,28 @@
 
 ;; --------------------------------------------------------------------
 
+(defvar *x* nil) ;; saved result for inspection
+
+(defun tst (&optional (n 100))
+    (organic-build-tree n)
+  
+    (format t "~%Nbr Nodes: ~A"
+            (ask *top-node* :count-nodes))
+
+    #+:LISPWORKS
+    (view-tree *top-node*)
+
+    (let ((msg "this is a test"))
+      (setf *x* (time (ask *top-node* :cosi 1 msg)))
+      (time (ask *top-node* :validate (car *x*) (cadr *x*))))
+    )
+
+#|
+(ac::kill-executives)
+
+(time (ask *top-node* :validate (second *x*) (third *x*)))
+
+ |#
 #|
 (organic-build-tree 100)
 

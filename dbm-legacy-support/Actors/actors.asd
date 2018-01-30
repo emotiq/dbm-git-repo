@@ -29,6 +29,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
   :author      "D.McClain <dbm@refined-audiometrics.com>"
   :license     "Copyright (c) 2017 by Refined Audiometrics Laboratory, LLC. MIT License terms apply."
   :components  ((:file "packages")
+                #+:ALLEGRO (:file "allegro-timer")
                 (:file "actors")
                 (:file "actors-machines")
                 (:file "actors-startup")
@@ -52,5 +53,6 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
   :SERIAL T
   :depends-on   ("data-objects"
                  "trivia"
+		 "mpcompat"
                  ))
 

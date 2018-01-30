@@ -9,6 +9,8 @@
 
 ;; --------------------------------------------------
 (in-package #:mp-compatibility)
+;; equiv to #F
+(declaim  (OPTIMIZE (SPEED 3) (SAFETY 0) (FLOAT 0)))
 ;; --------------------------------------------------
 ;; Compatibility Layer
 
@@ -200,7 +202,11 @@ A null timeout means wait forever."
   t)
 
 (defmacro compare-and-swap (place before after)
-  `(excl:atomic-conditional-setf ,place ,after ,before))
+  ;; Franz warns that atomic-conditional-setf can only be used as a
+  ;; test form in a conditional, a result of a
+  ;; technical compiler issue. So here we ensure that happens...
+  `(when (excl:atomic-conditional-setf ,place ,after ,before)
+     t))
 
 (defmacro CAS (place old new)
   `(compare-and-swap ,place ,old ,new))

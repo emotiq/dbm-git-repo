@@ -23,78 +23,71 @@
 ;; single-slot objects. Hence the code to RMW each of them would be
 ;; the same. Structure inheritance to the (clean) rescue!
 
-(defclass envelope ()
-  ((ref   :accessor  envelope-ref
-          :initform  nil
-          :initarg   :ref)))
-
-(defclass safe-mixin ()
-  ((lock  :reader    safe-mixin-lock
-          :initform  (mpcompat:make-lock))))
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defstruct 1-slot-envelope
+    (ref  nil)))
 
 ;; -----------------------------------------------------
 
-(defmethod rmw ((e envelope) modify-fn)
-  (declare (function modify-fn))
-  (setf (envelope-ref e) (funcall modify-fn (envelope-ref e))))
+(defun rmw (s modify-fn)
+  ;;
+  ;; s is some structure isomorphic to 1-slot-envelope, i.e., must
+  ;; have the RMW pointer in the first slot
+  ;;
+  (declare (1-slot-envelope s)
+           (function modify-fn))
+  (loop for old = (1-slot-envelope-ref s)
+        for new = (funcall modify-fn old)
+        until 
+	(CAS (1-slot-envelope-ref s) old new)))
 
-(defmethod exch ((e envelope) val)
-  (shiftf (envelope-ref e) val))
+#+:LISPWORKS
+(defun exch (s val)
+  (declare (1-slot-envelope s))
+  (sys:atomic-exchange (1-slot-envelope-ref s) val))
 
-;; ------------------------------------------
+#+:ALLEGRO
+(defun exch (s val)
+  (declare (1-slot-envelope s))
+  (loop for old = (1-slot-envelope-ref s)
+        until
+	(CAS (1-slot-envelope-ref s) old val)
+        finally
+	(return old)))
 
-(defmethod rmw :around ((s safe-mixin) modify-fn)
-  (mpcompat:with-lock ((safe-mixin-lock s))
-    (call-next-method)))
-
-(defmethod exch :around ((s safe-mixin) val)
-  (mpcompat:with-lock ((safe-mixin-lock s))
-    (call-next-method)))
-
-(defmethod countq :around ((s safe-mixin))
-  (mpcompat:with-lock ((safe-mixin-lock s))
-    (call-next-method)))
-          
 ;; --------------------------------------------------------------
 ;; UNSAFE-LIFO - A LIFO queue - unsafe for sharing
 
-(defclass unsafe-lifo (envelope)
-  ())
-
-(defun make-unsafe-lifo ()
-  (make-instance 'unsafe-lifo))
+(defstruct (unsafe-lifo
+            (:include 1-slot-envelope (:ref nil))))
 
 (defmethod addq ((q unsafe-lifo) item &key &allow-other-keys)
-  (push item (envelope-ref q)))
+  (push item (unsafe-lifo-ref q)))
 
 (defmethod popq ((q unsafe-lifo) &key &allow-other-keys)
-  (cond ((envelope-ref q)
-         (values (pop (envelope-ref q))) t)
+  (cond ((unsafe-lifo-ref q)
+         (values (pop (unsafe-lifo-ref q)) t))
         
         (t
          (values nil nil))
         ))
 
 (defmethod emptyq-p ((q unsafe-lifo))
-  (null (envelope-ref q)))
+  (null (unsafe-lifo-ref q)))
 
 (defmethod contents ((q unsafe-lifo))
-  (shiftf (envelope-ref q) nil))
+  (exch q nil))
 
 (defmethod findq ((q unsafe-lifo) val &rest args)
-  (apply 'find val (envelope-ref q) args))
+  (apply 'find val (unsafe-lifo-ref q) args))
 
 (defmethod lastq ((q unsafe-lifo))
-  (car (envelope-ref q)))
+  (car (unsafe-lifo-ref q)))
 
 ;; --------------------------------------------------------------
 ;; LIFO - A LIFO queue with safe sharing
 
-(defclass lifo  (safe-mixin unsafe-lifo)
-  ())
-
-(defun make-lifo ()
-  (make-instance 'lifo))
+(defstruct (lifo (:include unsafe-lifo)) )
 
 (defmethod addq ((q lifo) item &key &allow-other-keys)
   (rmw q (um:curry #'cons item)))
@@ -158,22 +151,15 @@
 ;; invariant: hd always points to a cell with null car,
 ;;   and when (EQ hd tl) the queue is empty
 
-(defclass unsafe-fifo ()
-  ((hd  :accessor unsafe-fifo-hd
-        :initarg  :hd)
-   (tl  :accessor unsafe-fifo-tl
-        :initarg  :tl)))
+(defstruct (unsafe-fifo
+            (:constructor %make-unsafe-fifo))
+  hd tl)
 
 (defun make-unsafe-fifo ()
   (let ((empty (list nil)))
-    (make-instance 'unsafe-fifo
-                   :hd empty
-                   :tl empty)))
-
-(defun copy-unsafe-fifo (f)
-  (make-instance 'unsafe-fifo
-                 :hd (copy-list (unsafe-fifo-hd f))
-                 :tl (copy-list (unsafe-fifo-tl f))))
+    (%make-unsafe-fifo
+     :hd empty
+     :tl empty)))
 
 (defmethod addq ((q unsafe-fifo) item &key &allow-other-keys)
   (with-accessors ((tl  unsafe-fifo-tl)) q
@@ -221,22 +207,13 @@
   (with-accessors ((tl unsafe-fifo-tl)) q
     (car tl)))
 
-(defmethod countq ((q unsafe-fifo))
-  (with-accessors ((hd  unsafe-fifo-hd)) q
-    (declare (cons hd tl))
-    (length (cdr hd))))
-
 ;; ---------------------------------------------------------------
 ;; FIFO - Fast FIFO Queue - safe for sharing
 ;;
 ;; Invariant: A non-empty queue always has a non-nil hd
 
-(defclass fifo (safe-mixin envelope)
-  ((ref  :accessor fifo-ref
-         :initform (cons nil nil))))
-
-(defun make-fifo ()
-  (make-instance 'fifo))
+(defstruct (fifo
+            (:include 1-slot-envelope (:ref (cons nil nil)))))
 
 (defun normalize-fifo (hd tl)
   (unless hd
@@ -275,39 +252,35 @@
     (nconc hd (nreverse tl))))
 
 (defmethod findq ((q fifo) val &rest args)
-  (mpcompat:with-lock ((safe-mixin-lock q))
-    (destructuring-bind (hd . tl) (fifo-ref q)
-      (or (apply 'find val hd args)
-          (apply 'find val tl args)))))
+  (destructuring-bind (hd . tl) (fifo-ref q)
+    (or (apply 'find val hd args)
+        (apply 'find val tl args))))
 
 ;; ------------------------------------------------------------------
 ;; UNSAFE-PRIQ - Fast Priority FIFO Queue - unsafe for sharing
 ;;
 ;; Invariant: No priority level in the tree has an empty FIFO queue
 
-(defclass unsafe-priq (envelope)
-  ((ref  :initform (maps:empty))))
-
-(defun make-unsafe-priq ()
-  (make-instance 'unsafe-priq))
+(defstruct (unsafe-priq
+            (:include 1-slot-envelope (:ref (maps:empty)))))
 
 (defmethod addq ((q unsafe-priq) item &key prio)
-  (let* ((tree (envelope-ref q))
+  (let* ((tree (unsafe-priq-ref q))
          (fq   (maps:find prio tree)))
     (unless fq
       (setf fq (make-unsafe-fifo)
-            (envelope-ref q) (maps:add prio fq tree)))
+            (unsafe-priq-ref q) (maps:add prio fq tree)))
     (addq fq item)))
 
 (defmethod popq ((q unsafe-priq) &key prio)
-  (let ((tree  (envelope-ref q)))
+  (let ((tree  (unsafe-priq-ref q)))
     (labels ((no ()
                (values nil nil))
 
              (yes (prio fq)
                (let ((ans (popq fq)))
                  (when (emptyq-p fq)
-                   (setf (envelope-ref q) (maps:remove prio tree)))
+                   (setf (unsafe-priq-ref q) (maps:remove prio tree)))
                  (values ans t))))
       
       (cond ((maps:is-empty tree) (no))
@@ -325,32 +298,30 @@
             ))))
 
 (defmethod emptyq-p ((q unsafe-priq))
-  (maps:is-empty (envelope-ref q)))
+  (maps:is-empty (unsafe-priq-ref q)))
 
 (defmethod countq ((q unsafe-priq))
-  (let ((ct 0))
-    (maps:iter (lambda (k v)
-                 (declare (ignore k))
-                 (incf ct (countq v)))
-               (envelope-ref q))
-    ct))
+  (sets:cardinal (unsafe-priq-ref q)))
           
 ;; ------------------------------------------------------------------
 ;; PRIQ - Priority FIFO Queue - safe for sharing
 ;;
 ;; Invariant: No priority level in the tree has an empty FIFO queue
 
-(defclass priq (safe-mixin unsafe-priq)
-  ())
-
-(defun make-priq ()
-  (make-instance 'priq))
+(defstruct (priq (:include unsafe-priq)))
 
 (defmethod addq ((q priq) item &key (prio 0))
   (rmw q (lambda (tree)
            (let ((fq (maps:find prio tree)))
-             (unless fq
-               (setf fq (make-unsafe-fifo)))
+             (cond (fq
+                    (setf fq (copy-fifo fq)))
+                   
+                   (t
+                    ;; must use a safe FIFO even though our copy isn't
+                    ;; shared yet, because UNSAFE-FIFO uses NREVERSE
+                    ;; which isn't playing by purely functional rules.
+                    ;;
+                    (setf fq (make-fifo))) )
              (addq fq item)
              (maps:add prio fq tree))) ;; MAPS:ADD replaces any existing entry
        ))
@@ -378,7 +349,8 @@
                         tree)
 
                       (yes (prio fq)
-                        (setf ans   (popq fq)
+                        (setf fq    (copy-fifo fq)
+                              ans   (popq fq)
                               found t)
                         (if (emptyq-p fq)
                             (maps:remove prio tree)
@@ -404,12 +376,8 @@
 
 #+:LISPWORKS
 (progn
-  (defclass prio-mailbox (priq)
-    ((sem  :reader   prio-mailbox-sem
-           :initform (mp:make-semaphore :count 0))))
-  
-  (defun make-prio-mailbox ()
-    (make-instance 'prio-mailbox))
+  (defstruct (prio-mailbox (:include priq))
+    (sem  (mp:make-semaphore :count 0) :read-only t))
   
   (defmethod mailbox-send ((mbox prio-mailbox) msg &key (prio 0))
     (with-accessors ((sem  prio-mailbox-sem)) mbox
@@ -434,12 +402,8 @@
 
 #+:ALLEGRO
 (progn
-  (defclass prio-mailbox (priq)
-    ((sem  :reader   prio-mailbox-sem
-           :initform (mp:make-gate nil))))
-
-  (defun make-prio-mailbox ()
-    (make-instance 'prio-mailbox))
+  (defstruct (prio-mailbox (:include priq))
+    (sem  (mp:make-gate nil) :read-only t))
   
   (defmethod mailbox-send ((mbox prio-mailbox) msg &key (prio 0))
     (with-accessors ((sem  prio-mailbox-sem)) mbox

@@ -90,6 +90,12 @@
     ;; Actor queries so SMP safety not a concern on this slot.
     :accessor  actor-recv-info
     :initform  nil)
+   #|
+   #+:ALLEGRO
+   (lock
+    :reader    actor-lock
+    :initform  (mp:make-process-lock))
+   |#
    (busy
     ;; when non-nil this Actor is either already enqueued for running,
     ;; or is running. We use a CONS cell for the flag for SMP CAS
@@ -159,6 +165,58 @@
       (add-self-to-ready-queue))
     ))
 
+#|
+#+:ALLEGRO
+(progn
+  (defparameter *depth* 0)
+  (defun allegro-enable-actor (fn prio)
+    (mp:with-process-lock ((priq::safe-mixin-lock *actor-ready-queue*))
+      (let ((before (priq:countq *actor-ready-queue*)))
+	(mailbox-send *actor-ready-queue* fn :prio prio)
+	(let ((after (priq:countq *actor-ready-queue*)))
+	  (assert (= after (1+ before)))
+	  (setf *depth* (max *depth* after))
+	  )))))
+
+#+:ALLEGRO
+(defmethod send ((self actor) &rest msg)
+  ;; send a message to an Actor and possibly activate it if not
+  ;; already running. SMP-safe
+  (let ((mbox (actor-mailbox self)))
+    (labels ((add-self-to-ready-queue ()
+               ;; Mark busy, if not already marked. And if it wasn't
+               ;; already marked, place it into the ready queue and be
+               ;; sure there are Executives running.
+               (unless (mp:with-process-lock ((actor-lock self))
+                          (shiftf (car (actor-busy self)) t))
+                 ;; The Ready Queue just contains function closures to
+		 ;; be dequeued and executed by the Executives.
+		 (allegro-enable-actor #'run (actor-priority self))
+		 #|
+                 (mailbox-send *actor-ready-queue* #'run
+                               :prio (actor-priority self))
+		 |#
+                 (unless *executive-processes*
+                   (ensure-executives))))
+             
+             (run ()
+               (unwind-protect
+                   (let ((*current-actor* self))
+                     (loop for (msg ok) = (multiple-value-list
+                                           (next-message mbox))
+                           while ok do (apply 'dispatch-message self msg)))
+                 ;; <-- a message could have arrived here, but would
+                 ;; have failed to enqueue the Actor.  So we double
+                 ;; check after clearing the busy mark.
+                 (mp:with-process-lock ((actor-lock self))
+                    (setf (car (actor-busy self)) nil))
+                 (when (mailbox-not-empty-p mbox)
+                   (add-self-to-ready-queue)))))
+      (deposit-message mbox msg)
+      (add-self-to-ready-queue))
+    ))
+|#
+
 ;; -----------------------------------------------
 ;; Since these methods are called against (CURRENT-ACTOR) they can
 ;; only be called from within a currently active Actor.
@@ -202,9 +260,6 @@
                 :initarg  :selector-fn)
    (timeout-fn  :reader   recv-info-timeout-fn
                 :initarg  :timeout-fn)
-   ;; sharing lock for timer - concession for ACL
-   (lock        :reader   recv-info-timer-lock
-                :initform (mpcompat:make-lock))
    ;; currently active timer - when nil => none
    (timer       :accessor recv-info-timer
                 :initarg  :timer)))
@@ -255,40 +310,24 @@
           :recv-timeout-{3A95A26E-D84E-11E7-9D93-985AEBDA9C2A}
           this-id)))
 
-#+:LISPWORKS
 (defun make-timeout-timer (delta self this-id)
   (when delta
-    (let ((timer (mp:make-timer
+    (let ((timer (make-timer
                   'send-timeout-message self this-id)))
-      (mp:schedule-timer-relative timer delta)
+      (schedule-timer-relative timer delta)
       timer)))
 
-#+:ALLEGRO
-(defun make-timeout-timer (delta self this-id)
-  (when delta
-    (mp:process-run-function
-     "RECV Timeout Timer"
-     (lambda ()
-       (mp:process-sleep delta)
-       (send-timeout-message self this-id))
-     )))
-  
 (defmethod readout-timer ((info recv-info) tid)
   ;; destructively read out the timer
   (when info
     ;; might not be any info by now...
-    (mpcompat:with-lock ((recv-info-timer-lock info))
-      (when (eq tid (recv-info-id info))
-        ;; might be a new timer info block...
-        (shiftf (recv-info-timer info) nil)))))
+    (when (eq tid (recv-info-id info))
+      ;; might be a new timer info block...
+      (shiftf (recv-info-timer info) nil))))
 
 (defmethod kill-timer ((info recv-info))
   (when-let (timer (readout-timer info (recv-info-id info)))
-    #+:LISPWORKS
-    (mp:unschedule-timer timer)
-    #+:ALLEGRO
-    (mp:process-kill timer)
-    ))
+    (unschedule-timer timer)))
 
 ;; -------------------------------------------------------------
 
@@ -557,6 +596,7 @@
 (defvar *executive-counter*  0)   ;; just a serial number on Executive threads
 (defvar *heartbeat-interval* 1)   ;; how often the watchdog should check for system stall
 (defvar *maximum-age*        3)   ;; how long before watchdog should bark
+#||#
 (defvar *nbr-execs*               ;; should match the number of CPU Cores
   #+(AND :LISPWORKS :MACOSX)
   (load-time-value
@@ -567,6 +607,8 @@
            4)))
    t)
   #-(AND :LISPWORKS :MACOSX) 4)
+#||#
+;; (defvar *nbr-execs*   16)            ;; for now while we are testing...
 
 ;; ----------------------------------------------------------------
 ;; Ready Queue
@@ -643,13 +685,6 @@
           *executive-processes*)
     ))
 
-#+:ALLEGRO
-(defun #1=allegro-check-sufficient-execs ()
-  (loop
-    (sleep *heartbeat-interval*)
-    (when (check-sufficient-execs)
-      (return-from #1#))))
-
 #|
 (defun test-stall ()
   (loop repeat (1+ *nbr-execs*) do 
@@ -692,10 +727,7 @@
            ;; So in both cases, just kill off the timer and let a new
            ;; thread handle the notification with the user.
            ;; ----------------------------------------------
-	   #+:LISPWORKS
-           (mp:unschedule-timer (shiftf *heartbeat-timer* nil))
-	   #+:ALLEGRO
-	   (setf *heartbeat-timer* nil)
+           (unschedule-timer (shiftf *heartbeat-timer* nil))
            ;; --------------------------------------------
 	   
            (mp:process-run-function
@@ -710,6 +742,7 @@
                   (start-watchdog-timer))
                 (:spawn-new-executive ()
                   :report "Spawn another Executive"
+                  (incf *nbr-execs*)
                   (push-new-executive))
                 (:stop-actor-system ()
                   :report "Stop Actor system"
@@ -731,22 +764,14 @@
              *executive-processes*)
        (start-watchdog-timer))
 
-     #+:LISPWORKS
      (start-watchdog-timer ()
        (unless *heartbeat-timer*
          (setf *heartbeat-timer*
-               (mp:make-timer 'check-sufficient-execs))
-         (mp:schedule-timer-relative
+               (make-timer 'check-sufficient-execs))
+         (schedule-timer-relative
           *heartbeat-timer*
           *heartbeat-interval*
           *heartbeat-interval*)))
-
-     #+:ALLEGRO
-     (start-watchdog-timer ()
-       (unless *heartbeat-timer*
-         (setf *heartbeat-timer*
-               (mp:process-run-function "Heartbeat Timer"
-                                        'allegro-check-sufficient-execs))))
 
      (ensure-executives ()
        (unless *executive-processes*
@@ -756,10 +781,7 @@
      (kill-executives ()
        (let ((timer (shiftf *heartbeat-timer* nil)))
          (when timer
-           #+:LISPWORKS
-           (mp:unschedule-timer timer)
-           #+:ALLEGRO
-           (mp:process-kill timer)
+           (unschedule-timer timer)
            (setf *last-heartbeat* 0)))
        (let ((procs (shiftf *executive-processes* nil)))
          (setf *executive-counter* 0)
@@ -788,8 +810,8 @@
   `#'(lambda (%sk ,@parms) ,@body))
 
 (defmacro =defun (name parms &body body)
-  (let* ((f (symb '= name))
-         (has-rest (position '&rest parms))
+  (let* ((f            (symb '= name))
+         (has-rest     (position '&rest parms))
          (prefix-parms (subseq parms 0 has-rest))
          (tail-parm    (when has-rest
                          (nthcdr (1+ has-rest) parms))))

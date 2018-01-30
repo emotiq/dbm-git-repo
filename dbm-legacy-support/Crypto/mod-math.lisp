@@ -4,6 +4,9 @@
 
 (in-package :crypto-mod-math)
 
+;; equiv to #F
+(declaim  (OPTIMIZE (SPEED 3) (SAFETY 0) (FLOAT 0)))
+
 ;; -----------------------------------------------------
 (defvar *blinders* (make-hash-table))
 
@@ -12,7 +15,7 @@
 
 (um:defmonitor
     ((get-blinder (m)
-		  (or ;; 0 ;; no blinding...
+		  (or 0 ;; no blinding...
 		   (gethash m *blinders*)
 		   (setf (gethash m *blinders*) (create-blinder m))))
 
@@ -26,7 +29,6 @@
  ;; this is slower than just allowing Lisp to work
  ;; directly on bignums
 (defun expt-mod-naf (m x e)
-  #F
   (declare (integer base exponent modulus))
   (cond ((zerop x)  0)
         ((zerop e)  1)
@@ -48,7 +50,6 @@
 #||#
 (defun expt-mod (modulus base exponent)
   ;; base^exponent mod modulus, for any modulus
-  #F
   (declare (integer base exponent modulus))
   (let* ((exp (+ exponent (get-blinder (1- modulus))))
          (n   (integer-length exp)))
@@ -174,7 +175,6 @@
 |#
 #||#
 (defun mult-mod (m &rest args)
-  #F
   (declare (integer m))
   (let ((blinder (get-blinder m)))
     (reduce (lambda (prod x)
@@ -200,7 +200,6 @@
     ))
 
 (defun mult-mod2 (m &rest args)
-  #F
   (declare (integer m))
   (let ((blinder (get-blinder m)))
     (reduce (lambda (prod x)
@@ -213,7 +212,6 @@
 #||#
 #|
 (defun %mult-mod (m a b)
-  #F
   (declare (integer m a b))
   (when (< a b)
     (rotatef a b)) ;; smallest item in b
@@ -227,7 +225,6 @@
         (setf ans (add-mod m ans a)))) ))
 
 (defun mult-mod (m &rest args)
-  #F
   (declare (integer m))
   (reduce (lambda (prod x)
             (declare (integer prod x))
@@ -236,7 +233,6 @@
 |#
 
 (defun add-mod (m arg &rest args)
-  #F
   (declare (integer m))
   (if args
       (let ((blinder (get-blinder m)))
@@ -248,7 +244,6 @@
     (mod arg m)))
 
 (defun sub-mod (m arg &rest args)
-  #F
   (declare (integer m arg))
   (let ((blinder (get-blinder m)))
     (if args
@@ -261,7 +256,6 @@
 
 #|
 (defun extended-gcd (a b)
-  #F
   (declare (integer a b))
   ;; solve Bezout's identity: a*x + b*y = gcd(a,b)
   ;; for (x, y) => x is the modular multiplicative inverse of a modulo b,
@@ -277,14 +271,12 @@
                 (- x (* y q))) ))))
 
 (defun inv-mod (m a)
-  #F
   (declare (integer m a))
   (assert (= 1 (gcd a m))) ;; ensure A coprime with M
   (mod (extended-gcd a m) m))
 |#
 
 (defun inv-mod (m a)
-  #F
   (declare (integer m a))
   (let* ((u  (mod a m))
          (v  m)
@@ -302,7 +294,6 @@
 
 
 (defun div-mod (m arg &rest args)
-  #F
   (declare (integer m arg))
   (if args
       (reduce (lambda (quot dvsr)
