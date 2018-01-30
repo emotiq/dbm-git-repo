@@ -132,7 +132,7 @@
 
 ;; --------------------------------------------------------
 
-#+:LISPWORKS
+;; #+:LISPWORKS
 (defmethod send ((self actor) &rest msg)
   ;; send a message to an Actor and possibly activate it if not
   ;; already running. SMP-safe
@@ -166,7 +166,7 @@
       (add-self-to-ready-queue))
     ))
 
-#||#
+#|
 #+:ALLEGRO
 (progn
   (defparameter *depth* 0)
@@ -216,7 +216,7 @@
       (deposit-message mbox msg)
       (add-self-to-ready-queue))
     ))
-#||#
+|#
 
 ;; -----------------------------------------------
 ;; Since these methods are called against (CURRENT-ACTOR) they can
@@ -616,7 +616,7 @@
 (defvar *executive-counter*  0)   ;; just a serial number on Executive threads
 (defvar *heartbeat-interval* 1)   ;; how often the watchdog should check for system stall
 (defvar *maximum-age*        3)   ;; how long before watchdog should bark
-#|
+#||#
 (defvar *nbr-execs*               ;; should match the number of CPU Cores
   #+(AND :LISPWORKS :MACOSX)
   (load-time-value
@@ -627,8 +627,8 @@
            4)))
    t)
   #-(AND :LISPWORKS :MACOSX) 4)
-|#
-(defvar *nbr-execs*   16)            ;; for now while we are testing...
+#||#
+;; (defvar *nbr-execs*   16)            ;; for now while we are testing...
 
 ;; ----------------------------------------------------------------
 ;; Ready Queue
@@ -710,7 +710,7 @@
   (defun #1=allegro-check-sufficient-execs ()
     (loop
       (sleep *heartbeat-interval*)
-      (format t "~%wd: ~A (~A)" (incf cnt) (priq:countq *actor-ready-queue*))
+      ;; (format t "~%wd: ~A (~A)" (incf cnt) (priq:countq *actor-ready-queue*))
       (when (check-sufficient-execs)
 	(return-from #1#)))))
 
