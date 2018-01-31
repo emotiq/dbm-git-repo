@@ -714,7 +714,17 @@
 
 (defvar *x* nil) ;; saved result for inspection
 
-(defun tst (&optional (n 100))
+(defvar *test-iterations* '(100 200 400 800 1600))
+
+(defun multi-test (&optional (iter-list *test-iterations*))
+  (let ((elapsed-times nil))
+    (flet ((recorder (n seconds)
+             (setf elapsed-times (cons (cons n seconds) elapsed-times))))
+      (dolist (n iter-list)
+        (tst n #'recorder)))
+    elapsed-times))
+
+(defun tst (&optional (n 100) (recorder nil))
     (organic-build-tree n)
   
     (format t "~%Nbr Nodes: ~A"
@@ -727,7 +737,10 @@
       (with-borrowed-mailbox (mbox)
         (send *top-node* :cosi mbox msg)
         (format t "~%Create ~a node multi-signature" n)
-        (time (setf *x* (mpcompat:mailbox-read mbox)))
+
+        (let ((starttime (get-universal-time)))
+          (time (setf *x* (mpcompat:mailbox-read mbox)))
+          (when recorder (funcall recorder n (- (get-universal-time) starttime))))
 
         (print "Verify signature")
         (time (ask *top-node* :validate msg (third *x*)))
