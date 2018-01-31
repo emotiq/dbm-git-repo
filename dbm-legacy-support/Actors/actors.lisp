@@ -7,7 +7,7 @@
 (in-package #:actors)
 
 ;; equiv to #F
-(declaim  (OPTIMIZE (SPEED 3) (SAFETY 0) #+:LISPWORKS (FLOAT 0)))
+(declaim  (OPTIMIZE (SPEED 3) (SAFETY 3) (debug 3) #+:LISPWORKS (FLOAT 0)))
 
 ;; ------------------------------------------------------
 
@@ -150,7 +150,7 @@
              
              (run ()
                (#+:LISPWORKS hcl:unwind-protect-blocking-interrupts-in-cleanups
-                #+:ALLEGRO   unwind-protect
+                #+(or :ALLEGRO :CLOZURE)   unwind-protect
                    (let ((*current-actor* self))
                      (loop for (msg ok) = (multiple-value-list
                                            (next-message mbox))
@@ -756,9 +756,9 @@
            (unschedule-timer (shiftf *heartbeat-timer* nil))
            ;; --------------------------------------------
 	   
-           (mp:process-run-function
+           (mpcompat:process-run-function
             "Handle Stalling Actors"
-            #+:LISPWORKS ()
+            '()
             (lambda ()
               (restart-case
                   (error "Actor Executives are stalled (blocked waiting or compute bound). ~&Last heartbeat was ~A sec ago."
@@ -783,9 +783,9 @@
        (setf *executive-processes* (delete proc *executive-processes*)))
      
      (push-new-executive ()
-       (push (mp:process-run-function
+       (push (mpcompat:process-run-function
               (format nil "Actor Executive ~D" (incf *executive-counter*))
-              #+:LISPWORKS '()
+              '()
               'executive-loop)
              *executive-processes*)
        (start-watchdog-timer))

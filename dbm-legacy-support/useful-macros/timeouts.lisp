@@ -3,7 +3,7 @@
 
 (defun do-with-timeout (timeout cleanup fn)
   (let* ((mbox   (mp:make-mailbox))
-         (thread (mp:process-run-function "Wait Function" ()
+         (thread (mpcompat:process-run-function "Wait Function" '()
                                           (lambda ()
                                             (mp:mailbox-send mbox (um:capture-ans-or-exn fn)))
                                           )))

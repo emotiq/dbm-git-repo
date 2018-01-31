@@ -10,7 +10,7 @@
 ;; --------------------------------------------------
 (in-package #:mp-compatibility)
 ;; equiv to #F
-(declaim  (OPTIMIZE (SPEED 3) (SAFETY 0) #+:LISPWORKS (FLOAT 0)))
+(declaim  (OPTIMIZE (SPEED 3) (SAFETY 3) (debug 3) #+:LISPWORKS (FLOAT 0)))
 ;; --------------------------------------------------
 ;; Compatibility Layer
 
@@ -70,12 +70,60 @@
 
 ;; --------------------------------------------------------------------------
 
-(defun process-run-function (name flags proc &rest args)
+#| Just some notes to help me keep the arglists straight
+MPCOMPAT:
+process-run-function (name keywords proc &rest args)
+
+Options:
+(process-run-function "Foo"
+  '(:eenie 3 :minie 4)
+  (lambda (x)
+    (sleep x))
+  10)
+
+(process-run-function "Foo"
+  nil
+  (lambda (x)
+    (sleep x))
+  10)
+
+(process-run-function "Foo"
+  nil
+  (lambda ()
+    (sleep 10)))
+
+
+MP: (Internal to CCL)
+process-run-function (name-or-keywords function &rest args)
+
+Options:
+(process-run-function '(:name "Foo" :eenie 3 :minie 4)
+  (lambda (x)
+    (sleep x))
+  10)
+
+(process-run-function "Foo"
+  (lambda (x)
+    (sleep x))
+  10)
+
+(process-run-function "Foo"
+  (lambda ()
+    (sleep 10)))
+
+The background version
+(defun background-process-run-function (keywords function)
+  (unless (listp keywords)
+    (setf keywords (list :name keywords)))
+     ...
+
+|#
+(defun process-run-function (name keywords proc &rest args)
   "Spawn a new Lisp thread and run the indicated function with inital args."
-  (declare (ignore flags))
+  (setf name (append (list :name name) keywords))
   (if (find-package :gui)
     (funcall (intern "BACKGROUND-PROCESS-RUN-FUNCTION" :gui)
-             (list :name name)
+             name
              (lambda ()
                (apply proc args)))
     (apply #'mp:process-run-function name proc args)))
@@ -232,3 +280,5 @@
 
 (defmacro CAS (place old new)
   `(compare-and-swap ,place ,old ,new))
+
+

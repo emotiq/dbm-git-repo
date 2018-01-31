@@ -94,7 +94,7 @@
 (defmethod initialize-instance :after ((rpsmon rps-monitor) &key &allow-other-keys)
   (setf (rps-monitor-proc rpsmon) (mpcompat:process-run-function
                                    (symbol-name (gensym "RPS Monitor "))
-                                   ()
+                                   '()
                                    'rps-monitor-loop
                                    (rps-monitor-queue rpsmon)
                                    )))

@@ -140,7 +140,7 @@
 (defun encrypt-files (key)
   (labels ((save-files (pane filenames xpos ypos)
              (declare (ignore xpos ypos))
-             (mp:process-run-function "Encryptor" nil
+             (mpcompat:process-run-function "Encryptor" nil
                                       #'do-encrypt-files filenames key)
              (capi:destroy (capi:element-interface pane))))
     (capi:contain (make-instance 'capi:output-pane

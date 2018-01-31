@@ -65,5 +65,5 @@
 (defun tst2 (&optional (N #N1_000))
   (time
    (loop repeat n do
-         (mp:process-run-function "test" () (lambda ()
+         (mpcompat:process-run-function "test" '() (lambda ()
                                               nil)))))

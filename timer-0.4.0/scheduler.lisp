@@ -227,11 +227,12 @@
   (mp:with-process-lock (*timers-enabled-mutex*)
     (unless *timers-enabled-p*
       (setf *timers-enabled-p* t)
-      (mp:process-run-function "Timer Executive"
-                               (lambda ()
-				 (unwind-protect
-                                     (scheduler)
-				   (setf *timers-enabled-p* nil))))
+      (mpcompat:process-run-function "Timer Executive"
+        '()
+        (lambda ()
+          (unwind-protect
+              (scheduler)
+            (setf *timers-enabled-p* nil))))
       (values))))
 
 

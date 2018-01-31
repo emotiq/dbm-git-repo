@@ -85,8 +85,8 @@
                *timeout-tree*)))
       
 (defun make-master-timer ()
-  (mp:process-run-function "Master Timer"
-                           #+:LISPWORKS ()
+  (mpcompat:process-run-function "Master Timer"
+                           '()
                            (lambda ()
                              (loop
                               (sleep 0.1)

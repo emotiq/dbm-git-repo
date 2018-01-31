@@ -460,7 +460,7 @@
                    (popq mbox))
               (progn
                 (mp:wait-on-semaphore sem nil wait-reason)
-                (popq mbox))))))
+                (popq mbox)))))))
 
 ;; ------------------------------------------------------
 
