@@ -1,5 +1,5 @@
 
-(in-package #:user)
+(in-package :cl-user)
 
 (asdf:defsystem "alt-decompressor"
   :description "alt-decompressor: decryption based on NIST B-571 Elliptic Curve Cryptography"

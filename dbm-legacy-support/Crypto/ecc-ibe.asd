@@ -1,5 +1,5 @@
 
-(in-package #:user)
+(in-package :cl-user)
 
 (asdf:defsystem "ecc-ibe"
   :description "ecc-ibe: ECC Identity Based Encryption / Decryption for Messaging"

@@ -90,12 +90,6 @@
     ;; Actor queries so SMP safety not a concern on this slot.
     :accessor  actor-recv-info
     :initform  nil)
-   #|
-   #+:ALLEGRO
-   (lock
-    :reader    actor-lock
-    :initform  (mp:make-process-lock))
-   |#
    (busy
     ;; when non-nil this Actor is either already enqueued for running,
     ;; or is running. We use a CONS cell for the flag for SMP CAS
@@ -150,7 +144,7 @@
              
              (run ()
                (#+:LISPWORKS hcl:unwind-protect-blocking-interrupts-in-cleanups
-                #+:ALLEGRO   unwind-protect
+                #+(OR :ALLEGRO :CLOZURE)  unwind-protect
                    (let ((*current-actor* self))
                      (loop for (msg ok) = (multiple-value-list
                                            (next-message mbox))
@@ -164,58 +158,6 @@
       (deposit-message mbox msg)
       (add-self-to-ready-queue))
     ))
-
-#|
-#+:ALLEGRO
-(progn
-  (defparameter *depth* 0)
-  (defun allegro-enable-actor (fn prio)
-    (mp:with-process-lock ((priq::safe-mixin-lock *actor-ready-queue*))
-      (let ((before (priq:countq *actor-ready-queue*)))
-	(mailbox-send *actor-ready-queue* fn :prio prio)
-	(let ((after (priq:countq *actor-ready-queue*)))
-	  (assert (= after (1+ before)))
-	  (setf *depth* (max *depth* after))
-	  )))))
-
-#+:ALLEGRO
-(defmethod send ((self actor) &rest msg)
-  ;; send a message to an Actor and possibly activate it if not
-  ;; already running. SMP-safe
-  (let ((mbox (actor-mailbox self)))
-    (labels ((add-self-to-ready-queue ()
-               ;; Mark busy, if not already marked. And if it wasn't
-               ;; already marked, place it into the ready queue and be
-               ;; sure there are Executives running.
-               (unless (mp:with-process-lock ((actor-lock self))
-                          (shiftf (car (actor-busy self)) t))
-                 ;; The Ready Queue just contains function closures to
-		 ;; be dequeued and executed by the Executives.
-		 (allegro-enable-actor #'run (actor-priority self))
-		 #|
-                 (mailbox-send *actor-ready-queue* #'run
-                               :prio (actor-priority self))
-		 |#
-                 (unless *executive-processes*
-                   (ensure-executives))))
-             
-             (run ()
-               (unwind-protect
-                   (let ((*current-actor* self))
-                     (loop for (msg ok) = (multiple-value-list
-                                           (next-message mbox))
-                           while ok do (apply 'dispatch-message self msg)))
-                 ;; <-- a message could have arrived here, but would
-                 ;; have failed to enqueue the Actor.  So we double
-                 ;; check after clearing the busy mark.
-                 (mp:with-process-lock ((actor-lock self))
-                    (setf (car (actor-busy self)) nil))
-                 (when (mailbox-not-empty-p mbox)
-                   (add-self-to-ready-queue)))))
-      (deposit-message mbox msg)
-      (add-self-to-ready-queue))
-    ))
-|#
 
 ;; -----------------------------------------------
 ;; Since these methods are called against (CURRENT-ACTOR) they can
@@ -815,7 +757,7 @@
            (ignore-errors
              #+:LISPWORKS
              (mp:process-terminate proc)
-             #+:ALLEGRO
+             #+(OR :ALLEGRO :CLOZURE)
              (mp:process-kill proc)))
          (empty-ready-queue)
          ))))

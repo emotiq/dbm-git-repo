@@ -1,4 +1,4 @@
-(in-package #:user)
+(in-package :cl-user)
 
 (asdf:defsystem "save-shares"
   :description "save-shares: save supplied user licenses to shares files"

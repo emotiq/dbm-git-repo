@@ -1,4 +1,4 @@
-(in-package #:user)
+(in-package :cl-user)
 
 (asdf:defsystem "aont"
   :description "aont: all or nothing encode / decode"

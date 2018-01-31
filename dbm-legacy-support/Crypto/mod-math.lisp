@@ -5,7 +5,7 @@
 (in-package :crypto-mod-math)
 
 ;; equiv to #F
-(declaim  (OPTIMIZE (SPEED 3) (SAFETY 0) (FLOAT 0)))
+(declaim  (OPTIMIZE (SPEED 3) (SAFETY 0) #+:LISPWORKS (FLOAT 0)))
 
 ;; -----------------------------------------------------
 (defvar *blinders* (make-hash-table))

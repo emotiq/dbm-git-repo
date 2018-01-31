@@ -44,15 +44,13 @@
 (def-cached-var my-random-state
   #+:LISPWORKS
   (lw:make-mt-random-state t)
-  #+:ALLEGRO
-  (make-random-state t))
+  #+(or :ALLEGRO :CLOZURE)  (make-random-state t))
 
 (um:defmonitor
     ((my-random (n)
        #+:LISPWORKS
        (lw:mt-random n (my-random-state))
-       #+:ALLEGRO
-       (random n (my-random-state)))
+       #+(or :ALLEGRO :CLOZURE)       (random n (my-random-state)))
      ))
 
 ;; -----------------------------------------------------------------------------

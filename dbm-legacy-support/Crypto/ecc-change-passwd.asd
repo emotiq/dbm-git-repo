@@ -1,5 +1,5 @@
 
-(in-package #:user)
+(in-package :cl-user)
 
 (asdf:defsystem "ecc-change-passwd"
   :description "ecc-change-passwd: password management for ECC"

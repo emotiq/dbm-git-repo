@@ -1,7 +1,7 @@
 ;; ecc-package.lisp
 ;; -----------------------------------
 
-(in-package :user)
+(in-package :cl-user)
 
 (defpackage :crypto-mod-math
   (:use :common-lisp)
