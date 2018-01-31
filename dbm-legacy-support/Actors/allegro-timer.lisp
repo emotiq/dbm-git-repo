@@ -18,8 +18,8 @@
 
 (in-package :allegro-timer)
 
-(defvar *timeout-queue*  (priq:make-prio-mailbox))
-(defvar *cancel-queue*   (priq:make-prio-mailbox))
+(defvar *timeout-queue*  (priq:make-priq))
+(defvar *cancel-queue*   (priq:make-priq))
 (defvar *cycle-bits*     0.0)
 (defvar *last-check*     0)
 (defvar *timeout-tree*   (maps:empty))
@@ -47,28 +47,28 @@
 (defmethod schedule-timer ((timer timer) t0 &optional repeat)
   (setf (timer-t0 timer) t0
         (timer-period timer) repeat)
-  (priq:mailbox-send *timeout-queue* timer))
+  (priq:addq *timeout-queue* timer))
 
 (defmethod schedule-timer-relative ((timer timer) trel &optional repeat)
   (let ((t0 (+ trel (get-universal-time))))
     (setf (timer-t0 timer)     t0
           (timer-period timer) repeat)
-    (priq:mailbox-send *timeout-queue* timer)))
+    (priq:addq *timeout-queue* timer)))
 
 (defmethod unschedule-timer ((timer timer))
-  (priq:mailbox-send *cancel-queue* timer))
+  (priq:addq *cancel-queue* timer))
 
 
 (defun #1=check-timeouts ()
   ;; read new requests
-  (loop for timer = (priq:mailbox-read *timeout-queue* "" 0)
+  (loop for timer = (priq:popq *timeout-queue*)
         while timer
         do
         (let* ((t0     (timer-t0 timer))
                (timers (maps:find t0 *timeout-tree*)))
           (setf *timeout-tree* (maps:add t0 (cons timer timers) *timeout-tree*))))
   ;; process cancellations
-  (loop for timer = (priq:mailbox-read *cancel-queue* "" 0)
+  (loop for timer = (priq:popq *cancel-queue*)
         while timer
         do
         (let* ((t0     (timer-t0 timer))

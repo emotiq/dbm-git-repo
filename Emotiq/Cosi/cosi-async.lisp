@@ -399,7 +399,9 @@
        (=values ans))
 
       :TIMEOUT timeout
-      :ON-TIMEOUT (=values nil)
+      :ON-TIMEOUT (progn
+                    (become 'do-nothing)
+                    (=values nil))
       )))
 
 (defun node-make-cosi-commitment (state reply-to seq-id msg)
@@ -447,7 +449,9 @@
        (=values nil))
 
       :TIMEOUT timeout
-      :ON-TIMEOUT (=values nil)
+      :ON-TIMEOUT (progn
+                    (become 'do-nothing)
+                    (=values nil))
       )))
 
 (defun node-compute-signature (state reply-to seq-id c)

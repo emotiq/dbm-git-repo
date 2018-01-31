@@ -37,7 +37,7 @@
 
 (defclass actor-mailbox ()
   ((mbox   :reader   actor-message-mbox
-           :initform (make-prio-mailbox))
+           :initform (make-priq))
    (replay :accessor actor-message-replay
            :initform nil)))
 
@@ -49,7 +49,7 @@
       (values (pop (actor-message-replay mbox)) t)
     ;; else - mailbox read with no name, zero timeout - immediate
     ;; return of (val t/f)
-    (mailbox-read (actor-message-mbox mbox) "" 0)))
+    (popq (actor-message-mbox mbox))))
 
 (defmethod enqueue-replay ((mbox actor-mailbox) lst)
   ;; enqueue our list of messages ahead of pending stashed in mailbox
@@ -57,12 +57,12 @@
 
 (defmethod deposit-message ((mbox actor-mailbox) msg &key (priority 0))
   ;; deposit one message into the mailbox
-  (mailbox-send (actor-message-mbox mbox) msg :prio priority))
+  (addq (actor-message-mbox mbox) msg :prio priority))
 
 (defmethod mailbox-not-empty-p ((mbox actor-mailbox))
   ;; true if either stashed messsages or some in mailbox
   (or (actor-message-replay mbox)
-      (not (mailbox-empty-p (actor-message-mbox mbox)))))
+      (not (emptyq-p (actor-message-mbox mbox)))))
 
 ;; -----------------------------------------------------
 ;; Version 3... make the Actor's internal state more readily visible

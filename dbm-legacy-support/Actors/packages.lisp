@@ -31,7 +31,10 @@
    #:mailbox-send
    #:mailbox-empty-p
    #:make-unsafe-fifo
+   #:make-priq
    #:addq
+   #:popq
+   #:emptyq-p
    #:contents)
   (:import-from #:trivia
    #:match
