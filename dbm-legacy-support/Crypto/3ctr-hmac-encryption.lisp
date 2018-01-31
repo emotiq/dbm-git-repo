@@ -29,7 +29,7 @@
       (let ((key4  (kdf 1024 key nonce salt)))
         
         (setf ecb  (list (make-ecb-cipher :twofish (subseq key4 0   32))
-                         (make-ecb-cipher :aesx    (subseq key4 32  64))
+                         (make-ecb-cipher :aes     (subseq key4 32  64))
                          (make-ecb-cipher :twofish (subseq key4 64  96)) )
               
               mac  (ironclad:make-hmac (subseq key4 96) :sha256))

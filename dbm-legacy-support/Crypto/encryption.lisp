@@ -23,7 +23,7 @@
   (dolist (cipher (multiple-cbc-cipher-ciphers cipher))
     (apply #'safe-decrypt-in-place cipher blks)))
 
-(defun make-twofish-aes-cbc-cipher (key-2fish iv-2fish key-aes iv-aes &optional (aes-mode :aesx))
+(defun make-twofish-aes-cbc-cipher (key-2fish iv-2fish key-aes iv-aes &optional (aes-mode :aes))
   (make-multiple-cbc-cipher
    :ciphers (list
              (make-cbc-cipher :twofish key-2fish iv-2fish)
@@ -73,7 +73,7 @@
           (write-sequence buf fout)
           
           (let* ((digbytes (start-aes buf key))
-                 (enc (ironclad:make-cipher :aesx
+                 (enc (ironclad:make-cipher :aes
                                             :key  digbytes
                                             :mode :cbc
                                             :initialization-vector buf))
@@ -112,7 +112,7 @@
           (read-sequence buf fin)
           (let* ((lastn    (ldb (byte 4 0) (aref buf 15)))
                  (digbytes (start-aes buf key))
-                 (enc      (ironclad:make-cipher :aesx
+                 (enc      (ironclad:make-cipher :aes
                                                  :key  digbytes
                                                  :mode :cbc
                                                  :initialization-vector buf))
@@ -272,7 +272,7 @@
 (defvar *aesx-256-single-level-encryption*
   #$(uuid {8876C3CC-5C22-11E1-A65D-C82A14446EA7}))
 
-(defun derive-engines-for-encryption (keys &optional (aes-mode :aesx))
+(defun derive-engines-for-encryption (keys &optional (aes-mode :aes))
   (with-kdf-fields (((ke 256)
                      (km 256)
                      (iv 128))
@@ -281,7 +281,7 @@
            (hmac   (ironclad:make-hmac km :sha256)))
       (values
        (ecase aes-mode
-         (:aesx *aesx-256-single-level-encryption*)
+         ;; (:aesx  *aesx-256-single-level-encryption*)
          (:aes  *aes-256-single-level-encryption* ))
        cipher hmac))))
 
@@ -294,7 +294,7 @@
 (defvar *twofish-aesx-256-dual-level-encryption*
   #$(uuid {6CC8F500-5C22-11E1-A65D-C82A14446EA7}))
 
-(defun derive-engines-for-two-level-encryption (keys &optional (aes-mode :aesx))
+(defun derive-engines-for-two-level-encryption (keys &optional (aes-mode :aes))
   (with-kdf-fields (((ke1 256)
                      (ke2 256)
                      (km  256)
@@ -305,7 +305,7 @@
                     ke1 iv1 ke2 iv2 aes-mode))
            (hmac  (ironclad:make-hmac km :sha256)))
       (values (ecase aes-mode
-                (:aesx *twofish-aesx-256-dual-level-encryption*)
+                ;; (:aesx *twofish-aesx-256-dual-level-encryption*)
                 (:aes  *twofish-aes-256-dual-level-encryption*))
               cipher hmac))))
   
@@ -326,8 +326,8 @@
 (defun decrypt-msg (cmsg keys)
   (destructuring-bind (ctype c m) cmsg
     (multiple-value-bind (etype cipher hmac)
-        (cond ((uuid:uuid= ctype *twofish-aesx-256-dual-level-encryption*)
-               (derive-engines-for-two-level-encryption keys :aesx))
+        (cond ;; ((uuid:uuid= ctype *twofish-aesx-256-dual-level-encryption*)
+              ;;  (derive-engines-for-two-level-encryption keys :aesx))
               ((uuid:uuid= ctype *twofish-aes-256-dual-level-encryption*)
                (derive-engines-for-two-level-encryption keys :aes))
               ((uuid:uuid= ctype *aes-256-single-level-encryption*)
@@ -634,7 +634,7 @@
              (aes-mode
               (let ((ftype (uuid:byte-array-to-uuid (read-nvector 16 fin))))
                 (cond
-                 ((uuid:uuid= *twofish-aesx-file-encryption* ftype) :aesx)
+                 ;; ((uuid:uuid= *twofish-aesx-file-encryption* ftype) :aesx)
                  ((uuid:uuid= *twofish-aes-file-encryption* ftype)  :aes)
                  (t (error "Unrecognized encryption mode")) )))
              
