@@ -672,7 +672,7 @@
 (defun organic-build-tree (&optional (n 1000))
   (setf *cosi-nodes* (maps:empty))
   (setf *cosi-pkeys* (maps:empty))
-  (print "Bulding cosigner node tree")
+  (print "Building cosigner node tree")
   (let ((all (time (loop repeat n collect (make-node)))))
     (setf *top-node* (cosi-node-id (car all)))
     (time

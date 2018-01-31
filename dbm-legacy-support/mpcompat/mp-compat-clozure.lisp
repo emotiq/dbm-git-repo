@@ -269,6 +269,12 @@ The background version
 (defun generate-uuid ()
   (uuid:make-v4-uuid))
 
+(defmacro atomic-incf (place)
+  `(ccl::atomic-incf ,place))
+
+(defmacro atomic-decf (place)
+  `(ccl::atomic-decf ,place))
+
 (defmacro compare-and-swap (place before after)
   (if (and (consp place)
            (or (eq 'car (car place))

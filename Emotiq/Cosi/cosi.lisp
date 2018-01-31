@@ -498,7 +498,7 @@
 (defun organic-build-tree (&optional (n 1000))
   (clrhash *cosi-nodes*)
   (clrhash *cosi-pkeys*)
-  (print "Bulding cosigner node tree")
+  (print "Building cosigner node tree")
   (let ((all (time (loop repeat n collect (make-node)))))
     (setf *top-node* (cosi-node-id (car all)))
     (time
