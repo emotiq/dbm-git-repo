@@ -1233,7 +1233,9 @@
     (subseq seq n)))
 
 (defun take (n seq)
-  (subseq seq 0 n))
+  (if (consp seq)
+      (subseq seq 0 (and (nthcdr n seq) n))
+    (subseq seq 0 (min n (length seq)))))
 
 (defun lastn (n lst)
   (nreverse (take n (reverse lst))))

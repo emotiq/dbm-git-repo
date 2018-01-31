@@ -47,7 +47,7 @@
   (if (actor-message-replay mbox)
       ;; replay stashed messages in order of arrival
       (values (pop (actor-message-replay mbox)) t)
-    ;; else - mailbox read with no name, zero timeout - immediate
+    ;; else - mailbox read with immediate return
     ;; return of (val t/f)
     (popq (actor-message-mbox mbox))))
 
