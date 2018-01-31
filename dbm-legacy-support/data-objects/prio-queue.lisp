@@ -458,7 +458,9 @@
           (if timeout
               (and (mp:timed-wait-on-semaphore sem timeout)
                    (popq mbox))
-              (mp:wait-on-semaphore sem nil wait-reason))))))
+              (progn
+                (mp:wait-on-semaphore sem nil wait-reason)
+                (popq mbox))))))
 
 ;; ------------------------------------------------------
 
