@@ -7,7 +7,7 @@
 (in-package #:priq)
 
 ;; equiv to #F
-(declaim  (OPTIMIZE (SPEED 3) (SAFETY 0) (FLOAT 0)))
+(declaim  (OPTIMIZE (SPEED 3) (SAFETY 0) #+:LISPWORKS (FLOAT 0)))
 
 ;; All FIFO Queues provide methods ADDQ, POPQ, and EMPTYQ-P, as well
 ;; as individual make-xxx constructors for variants.
@@ -429,6 +429,38 @@
                                  :timeout     timeout)
            (popq mbox))
       )))
+
+;; ------------------------------------------------------
+
+#+:CLOZURE
+(progn
+  (defclass prio-mailbox (priq)
+    ((sem  :reader   prio-mailbox-sem
+           :initform (mp:make-semaphore))))
+  
+  (defun make-prio-mailbox ()
+    (make-instance 'prio-mailbox))
+  
+  (defmethod mailbox-send ((mbox prio-mailbox) msg &key (prio 0))
+    (with-accessors ((sem  prio-mailbox-sem)) mbox
+      (addq mbox msg :prio prio)
+      (mp:signal-semaphore sem)))
+  
+  (defmethod mailbox-empty-p ((mbox prio-mailbox))
+    (emptyq-p mbox))
+  
+  (defmethod mailbox-not-empty-p ((mbox prio-mailbox))
+    (not (mailbox-empty-p mbox)))
+  
+  (defmethod mailbox-read ((mbox prio-mailbox) &optional wait-reason timeout)
+    (with-accessors ((sem prio-mailbox-sem)) mbox
+      (ccl:with-interrupts-enabled
+          (if timeout
+              (and (mp:timed-wait-on-semaphore sem timeout)
+                   (popq mbox))
+              (progn
+                (mp:wait-on-semaphore sem nil wait-reason)
+                (popq mbox)))))))
 
 ;; ------------------------------------------------------
 

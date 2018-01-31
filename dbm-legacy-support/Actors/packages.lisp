@@ -17,6 +17,18 @@
    :unschedule-timer
    ))
 
+#+:CLOZURE
+(defpackage :clozure-timer
+  (:nicknames :ctimer)
+  (:use :common-lisp)
+  (:export
+   :timer
+   :make-timer
+   :schedule-timer
+   :schedule-timer-relative
+   :unschedule-timer
+   ))
+
 (defpackage #:actors
   (:use #:common-lisp)
   (:nicknames #:ac)
@@ -64,6 +76,11 @@
    :unschedule-timer)
   #+:ALLEGRO
   (:import-from :atimer
+   :make-timer
+   :schedule-timer-relative
+   :unschedule-timer)
+  #+:CLOZURE
+  (:import-from :ctimer
    :make-timer
    :schedule-timer-relative
    :unschedule-timer)

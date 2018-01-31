@@ -30,6 +30,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
   :license     "Copyright (c) 2017 by Refined Audiometrics Laboratory, LLC. MIT License terms apply."
   :components  ((:file "packages")
                 #+:ALLEGRO (:file "allegro-timer")
+                #+:CLOZURE (:file "clozure-timer")
                 (:file "actors")
                 (:file "actors-machines")
                 (:file "actors-startup")

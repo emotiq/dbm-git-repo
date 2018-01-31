@@ -40,7 +40,7 @@
 ;; equiv to #F
 (declaim (optimize (speed  3)
                    (safety 0)
-                   (float  0)))
+                   #+:LISPWORKS (float  0)))
 
 ;; -----------------------------------------------------------------------------
 

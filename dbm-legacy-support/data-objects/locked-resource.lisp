@@ -1,8 +1,7 @@
-
 (in-package :um)
 
 ;; equiv to #F
-(declaim  (OPTIMIZE (SPEED 3) (SAFETY 0) (FLOAT 0)))
+(declaim  (OPTIMIZE (SPEED 3) (SAFETY 0) #+:LISPWORKS (FLOAT 0)))
 
 ;; ------------------------------------------------------------------------------------
 
@@ -10,7 +9,8 @@
   ((lock  :reader lm-lock  
 	  :initform 
 	  #+:LISPWORKS (mp:make-lock :sharing t)
-	  #+:ALLEGRO   (mp:make-sharable-lock))))
+	  #+:ALLEGRO   (mp:make-sharable-lock)
+          #+:CLOZURE   (ccl:make-read-write-lock))))
 
 (defclass <abstract-kv> ()
   ((tbl   :accessor lm-val :initform nil)))
@@ -56,6 +56,11 @@
    (mp:with-sharable-lock (:shared (lm-lock obj))
      (call-next-method)))
 
+  #+:CLOZURE
+  (:method (key (obj <lockable-mixin>) &optional default)
+   (ccl:with-read-lock ((lm-lock obj))
+     (call-next-method)))
+
   (:method (key (obj <plist>) &optional default)
    (let ((ans (getf (lm-val obj) key *unique*)))
      (if (eq ans *unique*)
@@ -81,13 +86,23 @@
   (:method (key (obj hash-table) &optional default)
    (hcl:with-hash-table-locked obj
      (gethash key obj default)))
+
+  #+:CLOZURE
+  (:method (key (obj hash-table) &optional default)
+     (gethash key obj default))
   
   ;; ALLEGRO-FIXME - need a variant for hash-tables here...
   )
 
 (defgeneric set-kv (key obj val)
+  #-:CLOZURE
   (:method (key (obj <lockable-mixin>) val)
    (mp:with-exclusive-lock ((lm-lock obj))
+     (call-next-method)))
+
+  #+:CLOZURE
+  (:method (key (obj <lockable-mixin>) val)
+   (ccl:with-write-lock ((lm-lock obj))
      (call-next-method)))
   
   (:method (key (obj <plist>) val)
@@ -111,6 +126,10 @@
   (:method (key (obj hash-table) val)
    (hcl:with-hash-table-locked obj
      (setf (gethash key obj) val)))
+
+  #+:CLOZURE
+  (:method (key (obj hash-table) val)
+     (setf (gethash key obj) val))
   
   ;; ALLEGRO-FIXME - need a variant for hash-tables here...
    )
@@ -126,6 +145,11 @@
   #+:ALLEGRO
   (:method ((obj <lockable-mixin>) fn)
    (mp:with-sharable-lock (:shared (lm-lock obj))
+     (call-next-method)))
+  
+  #+:CLOZURE
+  (:method ((obj <lockable-mixin>) fn)
+   (ccl:with-read-lock ((lm-lock obj))
      (call-next-method)))
 
   (:method ((obj <plist>) fn)
@@ -153,9 +177,15 @@
   )
                        
 (defgeneric ensure-kv (key obj val)
+  #-:CLOZURE
   (:method (key (obj <lockable-mixin>) val)
-   (mp:with-exclusive-lock ((lm-lock val))
-     (call-next-method)))
+    (mp:with-exclusive-lock ((lm-lock val))
+      (call-next-method)))
+
+  #+:CLOZURE
+  (:method (key (obj <lockable-mixin>) val)
+    (ccl:with-write-lock ((lm-lock val))
+      (call-next-method)))
   
   (:method (key (obj <plist>) val)
    (let ((ans (getf (lm-val obj) key *unique*)))
@@ -195,8 +225,14 @@
 
 
 (defgeneric remove-key (key obj)
+  #-:CLOZURE
   (:method (key (obj <lockable-mixin>))
    (mp:with-exclusive-lock ((lm-lock obj))
+     (call-next-method)))
+
+  #+:CLOZURE
+  (:method (key (obj <lockable-mixin>))
+   (ccl:with-write-lock ((lm-lock obj))
      (call-next-method)))
   
   (:method (key (obj <plist>))
@@ -274,8 +310,14 @@
 
 (defgeneric merge-kvs (obj new-kvs)
   ;; new-kvs should be a canonical plist
+  #-:CLOZURE
   (:method ((obj <lockable-mixin>) new-kvs)
    (mp:with-exclusive-lock ((lm-lock obj))
+     (call-next-method)))
+  
+  #+:CLOZURE
+  (:method ((obj <lockable-mixin>) new-kvs)
+   (ccl:with-write-lock ((lm-lock obj))
      (call-next-method)))
 
   (:method ((obj <plist>) new-kvs)
@@ -306,8 +348,14 @@
 
 (defgeneric set-kvs (obj new-kvs)
   ;; new-kvs should be canonical plist
+  #-:CLOZURE
   (:method ((obj <lockable-mixin>) new-kvs)
    (mp:with-exclusive-lock ((lm-lock obj))
+     (call-next-method)))
+
+  #+:CLOZURE
+  (:method ((obj <lockable-mixin>) new-kvs)
+   (ccl:with-write-lock ((lm-lock obj))
      (call-next-method)))
 
   (:method ((obj <plist>) new-kvs)
