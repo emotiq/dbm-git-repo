@@ -152,7 +152,7 @@
                  ;; <-- a message could have arrived here, but would
                  ;; have failed to enqueue the Actor.  So we double
                  ;; check after clearing the busy mark.
-                 (CAS (car (actor-busy self)) t nil)
+                 (setf (car (actor-busy self)) nil)
                  (when (mailbox-not-empty-p mbox)
                    (add-self-to-ready-queue)))))
       (deposit-message mbox msg)
