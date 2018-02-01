@@ -10,7 +10,7 @@
                 (:file "utilities")
                 (:file "ctr-hash-drbg")
                 (:file "primes")
-                #+:LISPWORKS (:file "crypto-le")
+                #+:COM.RAL (:file "crypto-le")
                 (:file "kdf")
                 (:file "gf-571")
                 (:file "mod-math")
@@ -18,11 +18,13 @@
                 (:file "ecc-B571")
                 (:file "curve-gen")
                 (:file "crypto-environ")
-                #+:LISPWORKS (:file "machine-id")
+                #+:COM.RAL (:file "machine-id")
                 (:file "lagrange-4-square"))
   :serial       t
   :depends-on   ("ironclad"
+                 #+:COM.RAL "aesx"
                  "useful-macros"
+				 "mpcompat"
                  "lisp-object-encoder"
                  "s-base64"
                  ))

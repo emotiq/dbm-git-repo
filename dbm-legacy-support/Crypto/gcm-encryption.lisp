@@ -35,7 +35,7 @@
 
       (let* ((key3  (kdf 768 key nonce salt)))
         (setf ecb (list (make-ecb-cipher :twofish (subseq key3 0   32))
-                        (make-ecb-cipher :aes     (subseq key3 32  64))
+                        (make-ecb-cipher :aesx    (subseq key3 32  64))
                         (make-ecb-cipher :twofish (subseq key3 64  96)) )
               poly (progn
                      (safe-encrypt-in-place ecb cvec)

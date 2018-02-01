@@ -328,8 +328,9 @@
 (defmethod wipe-obj ((c ironclad:aes))
   (reinitialize-instance c))
 
-;; (defmethod wipe-obj ((c ironclad:aesx))
-;;   (reinitialize-instance c))
+#+:COM.RAL
+(defmethod wipe-obj ((c ironclad:aesx))
+  (reinitialize-instance c))
 
 (defmethod wipe-obj ((c ironclad:twofish))
   (reinitialize-instance c))

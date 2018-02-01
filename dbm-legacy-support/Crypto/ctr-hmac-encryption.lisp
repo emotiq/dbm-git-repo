@@ -79,7 +79,7 @@
                      (salt  ctr-cipher-salt)
                      (nonce ctr-cipher-nonce)) cipher
       
-      (setf ecb  (list (make-ecb-cipher :aes     (kdf 256 :aes     key nonce salt))
+      (setf ecb  (list (make-ecb-cipher :aesx    (kdf 256 :aesx    key nonce salt))
                        (make-ecb-cipher :twofish (kdf 256 :twofish key nonce salt)))
             
             mac  (ironclad:make-hmac (kdf 256 :hmac-sha256 key nonce salt) :sha256))
