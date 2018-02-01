@@ -737,9 +737,10 @@
 
     (let ((msg "this is a test"))
       (with-borrowed-mailbox (mbox)
-        (send *top-node* :cosi mbox msg)
-        (format t "~%Create ~a node multi-signature" n)
-        (time (setf *x* (mpcompat:mailbox-read mbox)))
+        (loop repeat 3 do
+              (format t "~%Create ~a node multi-signature" n)
+              (send *top-node* :cosi mbox msg)
+              (time (setf *x* (mpcompat:mailbox-read mbox))))
 
         (print "Verify signature")
         (values (ask *top-node* :validate msg (third *x*)) :done)
