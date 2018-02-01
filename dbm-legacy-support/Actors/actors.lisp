@@ -736,6 +736,7 @@
        (unless *heartbeat-timer*
          (setf *heartbeat-timer*
                (make-timer 'check-sufficient-execs))
+         (setf *last-heartbeat* (get-universal-time))
          (schedule-timer-relative
           *heartbeat-timer*
           *heartbeat-interval*

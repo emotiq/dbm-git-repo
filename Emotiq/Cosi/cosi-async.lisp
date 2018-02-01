@@ -341,7 +341,7 @@
   ;; We cache the computation on first request.
   ;;
   (with-node-state state
-    (reply reply-to
+    (reply reply-to :pkey state-id
            (or state-zkp 
                (multiple-value-bind (v vpt) (ed-random-pair)
                  (let* ((c     (hash-pt-pt vpt state-pkey)) ;; Fiat-Shamir NIZKP challenge
@@ -355,25 +355,42 @@
 
 (defparameter *cosi-pkeys* (maps:empty)) ;; previously verified public keys
 
-(defun validate-public-keys ()
+(defun do-validate-public-keys (reply-to)
   ;; Each verifier node maintains a cache of previously verified
   ;; public keys in *COSI-PKEYS*. If we have already seen the pkey in
   ;; the triple and verified it, we bypass re-verification and use the
   ;; cached value.
-  (maps:iter
-   (lambda (id node)
-     (declare (ignore node))
-     (destructuring-bind ((r c pcmpr))
-	 (ask id :public-key nil)
-       (let* ((pt   (ed-decompress-pt pcmpr)) ;; node's public key
-	      (vpt  (ed-add (ed-nth-pt r)    ;; validate with NIZKP 
-			    (ed-mul pt c))))
-	 (assert (= c (hash-pt-pt vpt pt)))
-         (loop for old = *cosi-pkeys*
-               until (mpcompat:cas *cosi-pkeys* old
-                                   (maps:add id pt old)))
-         )))
-   *cosi-nodes*))
+  (let ((nodes (um:accum acc
+                 (maps:iter (lambda (k v)
+                              (declare (ignore v))
+                              (acc k))
+                            *cosi-nodes*)))
+        (self  (current-actor)))
+    (labels ((next ()
+               (if (endp nodes)
+                   (progn
+                     (become 'do-nothing) ;; for late arrivals
+                     (reply reply-to :ok))
+                 (progn
+                   (send (pop nodes) :public-key self)
+                   (recv
+                     ((list :pkey node-id (list r c pcmpr))
+                      (let* ((pt   (ed-decompress-pt pcmpr)) ;; node's public key
+                             (vpt  (ed-add (ed-nth-pt r)    ;; validate with NIZKP 
+                                           (ed-mul pt c))))
+                        (assert (= c (hash-pt-pt vpt pt)))
+                        (setf *cosi-pkeys* (maps:add node-id pt *cosi-pkeys*))
+                        (next)))
+
+                     :TIMEOUT *default-timeout-period*
+                     :ON-TIMEOUT (next))
+                   ))))
+      (next))))
+
+(defun validate-public-keys ()
+  (with-borrowed-mailbox (mbox)
+    (spawn 'do-validate-public-keys mbox)
+    (mpcompat:mailbox-read mbox)))
 
 (defun node-reset (state seq-id)
   ;; maybe we should do sanity checking on seq-id?
@@ -672,18 +689,16 @@
 (defun organic-build-tree (&optional (n 1000))
   (setf *cosi-nodes* (maps:empty))
   (setf *cosi-pkeys* (maps:empty))
-  (print "Building cosigner node tree")
-  (let ((all (time (loop repeat n collect (make-node)))))
+  (print "Bulding witness nodes")
+  (let ((all (loop repeat n collect (make-node))))
     (setf *top-node* (cosi-node-id (car all)))
-    (time
-     (progn
-       (dolist (node (cdr all))
-         (send *top-node* :insert-node nil (cosi-node-id node)))
-       (ask *top-node* :count-nodes)))
+    (print "Constructing node tree")
+    (with-borrowed-mailbox (mbox)
+      (dolist (node (cdr all))
+        (send *top-node* :insert-node mbox (cosi-node-id node))
+        (mpcompat:mailbox-read mbox)))
     (print "Validating public keys")
-    (time
-     (validate-public-keys))
-    ))
+    (validate-public-keys)))
 
 ;; --------------------------------------------------------------------
 ;; for visual debugging...
@@ -714,22 +729,9 @@
 
 (defvar *x* nil) ;; saved result for inspection
 
-(defvar *test-iterations* '(100 200 400 800 1600))
-
-(defun multi-test (&optional (iter-list *test-iterations*))
-  (let ((elapsed-times nil))
-    (flet ((recorder (n seconds)
-             (setf elapsed-times (cons (cons n seconds) elapsed-times))))
-      (dolist (n iter-list)
-        (tst n #'recorder)))
-    elapsed-times))
-
-(defun tst (&optional (n 100) (recorder nil))
+(defun tst (&optional (n 100))
     (organic-build-tree n)
   
-    (format t "~%Nbr Nodes: ~A"
-            (ask *top-node* :count-nodes))
-
     #+:LISPWORKS
     (view-tree *top-node*)
 
@@ -737,13 +739,10 @@
       (with-borrowed-mailbox (mbox)
         (send *top-node* :cosi mbox msg)
         (format t "~%Create ~a node multi-signature" n)
-
-        (let ((starttime (get-universal-time)))
-          (time (setf *x* (mpcompat:mailbox-read mbox)))
-          (when recorder (funcall recorder n (- (get-universal-time) starttime))))
+        (time (setf *x* (mpcompat:mailbox-read mbox)))
 
         (print "Verify signature")
-        (time (ask *top-node* :validate msg (third *x*)))
+        (values (ask *top-node* :validate msg (third *x*)) :done)
         ))
     )
 
