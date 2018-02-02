@@ -114,7 +114,7 @@
      (cond ((ok-to-proceed)
             (return (funcall valfn (cell-val ref))))
            
-           ((sys:compare-and-swap (cell-casflag ref) :uneval :in-process)
+           ((mpcompat:CAS (cell-casflag ref) :uneval :in-process)
             (unwind-protect
                 (let ((ans  (funcall evalfn (cell-val ref))))
                   ;; change both caar and cdar at same time
@@ -124,9 +124,12 @@
               
               ;; In case of early exit, put the CAS flag back for another try later.
               ;; If we finished normally, then this step will silently fail.
-              (sys:compare-and-swap (cell-casflag ref) :in-process :uneval)))
+              (mpcompat:CAS (cell-casflag ref) :in-process :uneval)))
            
            ((not *spin-wait*)
+	    #+:ALLEGRO
+	    (mp:process-wait "" #'ok-to-proceed)
+	    #+:LISPWORKS
             (mp:wait-processing-events nil
                                        :wait-function #'ok-to-proceed))
            ))))
@@ -182,7 +185,7 @@
   (let ((ref (once-only-fn x)))
     (forcer ref
             (curry #'ensure-once-only ref)
-            #'lw:false)))
+            (constantly nil))))
 
 ;; ------------------------------------
 ;; A ONCE-THEREAFTER performs the first clause on the first FORCE.
@@ -415,12 +418,5 @@
 
 #|
 ;; transpose
-(let* ((x '(1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17))
-       (xg (um:group x 4)))
-  (print xg)
-  (um:nlet iter ((m  xg))
-    (when (car m)
-      (cons (mapcar #'car m)
-            (iter (mapcar #'cdr m))))
-    ))
+(apply 'mapcar 'list (um:group '(1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16) 4))
 |#
