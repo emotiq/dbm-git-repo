@@ -18,14 +18,6 @@
 (defparameter *deminimus* 3 "If there are fewer nodes than this, do not create a new level in the tree")
 (defparameter *max-fanout* 5 "Max fanout from each node")
 
-(defun separate (list test)
-  "Returns two lists: Those items in list for which test passed,
-  and those for which it failed"
-  (loop for item in list
-    if (funcall test item) collect item into pass
-    else collect item into fail
-    finally (return (values pass fail))))
-
 (defun make-child-node (parent childIP nodelist)
   (send-admin-message childIP *standard-port* 'make-tree parent nodelist))
 
