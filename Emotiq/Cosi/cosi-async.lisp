@@ -747,6 +747,16 @@
         ))
     )
 
+(defparameter *lock-count* 0)
+
+(excl:def-fwrapper lock-wrap (&rest args)
+  (incf *lock-count*)
+  (call-next-fwrapper))
+#|
+(excl:fwrap 'mp:process-lock 'lock-wrapper 'lock-wrap)
+(excl:funwrap 'mp:process-lock 'lock-wrapper)
+|#
+
 #|
 (ac::kill-executives)
 

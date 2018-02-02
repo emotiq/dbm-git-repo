@@ -13,6 +13,7 @@
   :components  (
 		(:file "cosi-async")
 		;; (:file "cosi")
+		(:file "tst-cas")
                 )
   :SERIAL T
   :depends-on   (:ironclad
