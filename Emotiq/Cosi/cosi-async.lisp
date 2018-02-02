@@ -757,7 +757,6 @@
 (excl:fwrap 'ac:send 'send-wrapper 'lock-wrap)
 (excl:funwrap 'ac:send 'send-wrapper)
 
-;; don't do this!
 (excl:fwrap 'mp:process-lock 'lock-wrapper 'lock-wrap)
 (excl:funwrap 'mp:process-lock 'lock-wrapper)
 |#
