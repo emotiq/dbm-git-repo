@@ -29,18 +29,17 @@
 
 (defmacro def-cached-var (name creator &optional cache-name)
   (let ((cname (or cache-name
-                   (intern (format nil "*~A*" (string name))))))
+                   (intern (format nil "*~A*" (string name)))))
+        (new   (gensym)))
     `(progn
        (defvar ,cname nil)
        (defun ,name ()
          (or ,cname
-             (set-sym-once ',cname ,creator)))
+             (let ((,new ,creator))
+               (if (mpcompat:CAS ,cname nil ,new)
+                   ,new
+                 ,cname))))
        )))
-
-(defun set-sym-once (sym val)
-  (if (mpcompat:CAS (symbol-value sym) nil val)
-      val
-    (symbol-value sym)))
 
 #+:LISPWORKS
 (editor:setup-indent "def-cached-var" 1)
