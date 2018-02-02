@@ -13,14 +13,13 @@
 (defun create-blinder (m)
   (* m (ecc-crypto-b571:random-between #.(ash 1 31) #.(ash 1 32))))
 
-(um:defmonitor
-    ((get-blinder (m)
-		  (or 0 ;; no blinding...
-		   (gethash m *blinders*)
-		   (setf (gethash m *blinders*) (create-blinder m))))
+(defun get-blinder (m)
+  (or 0 ;; no blinding...
+      (gethash m *blinders*)
+      (setf (gethash m *blinders*) (create-blinder m))))
 
-     (reset-blinders ()
-		     (clrhash *blinders*))))
+(defun reset-blinders ()
+  (clrhash *blinders*))
 
 ;; -----------------------------------------------------
 ;; Prime-Field Arithmetic

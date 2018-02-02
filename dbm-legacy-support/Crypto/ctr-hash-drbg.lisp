@@ -9,14 +9,11 @@
 (def-cached-var ctr-hash-prng
   (ironclad:make-prng :fortuna :seed :urandom))
 
-(um:defmonitor
-    ;; protected by a global lock
-    ;; ctr-hash-prng is a shared mutable state
-    ((get-entropy (nb)
-       (ironclad:random-data nb (ctr-hash-prng)))
-     
-     (basic-random (n)
-       (ironclad:strong-random n (ctr-hash-prng)))))
+(defun get-entropy (nb)
+  (ironclad:random-data nb (ctr-hash-prng)))
+
+(defun basic-random (n)
+  (ironclad:strong-random n (ctr-hash-prng)))
 
 (defun basic-random-between (lo hi)
   ;; random number in interval [lo,hi)
