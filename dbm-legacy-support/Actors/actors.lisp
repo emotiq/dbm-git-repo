@@ -396,6 +396,11 @@
   ;; internals from a foreign thread prior to that release. When in
   ;; doubt, use a lock.
   ;;
+  ;; NOTE:  (=cont (without-actor-status (lambda () ...))) = (lambda () ...)
+  ;;
+  ;;  In other words, (=cont (without-actor-status )) is an identity
+  ;;  operation on functions.
+  ;;
   `(let ((*current-actor* nil))
      ,@body))
 
@@ -776,9 +781,11 @@
 ;; and must not be made a global special symbol.
 
 (defmacro =lambda (parms &body body)
+  ;; define an anonymous CPS function
   `#'(lambda (%sk ,@parms) ,@body))
 
 (defmacro =defun (name parms &body body)
+  ;; define a named CPS function
   (let* ((f            (symb '= name))
          (has-rest     (position '&rest parms))
          (prefix-parms (subseq parms 0 has-rest))
@@ -791,17 +798,40 @@
        (defun ,f (%sk ,@parms) ,@body))))
 
 (defmacro =bind (parms expr &body body)
+  ;;
+  ;; (let ((f (=LAMBDA ()
+  ;;             (=VALUES e1) )))
+  ;;
+  ;;   (=BIND (v)
+  ;;        (=FUNCALL f)
+  ;;     e2 ))
+  ;;
+  ;; equiv to ML:
+  ;;
+  ;;    let f k = function
+  ;;       k e1
+  ;;
+  ;;    let k v = function
+  ;;       e2
+  ;;    in
+  ;;       f k
+  ;;
   `(let ((%sk (=cont #'(lambda ,parms ,@body))))
      ,expr))
 
 (defmacro =values (&rest retvals)
+  ;; invoke a continuation. This should generally be in tail position
   `(funcall %sk ,@retvals))
 
 (defmacro =funcall (fn &rest args)
+  ;; invoke a CPS function
   `(funcall ,fn %sk ,@args))
 
 (defmacro =apply (fn &rest args)
+  ;; invoke a CPS function
   `(apply ,fn %sk ,@args))
+
+;; ---------------------------------------------------
 
 (defmacro with-cont (&body body)
   ;; for REPL toplevel call to function defined with =defun
