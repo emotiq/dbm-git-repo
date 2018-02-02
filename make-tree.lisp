@@ -21,12 +21,6 @@
 (defun make-child-node (parent childIP nodelist)
   (send-admin-message childIP *standard-port* 'make-tree parent nodelist))
 
-(defun should-be-my-child? (node &optional (IP (localhost-ip-address)))
-  "Look at IPaddress of node and decide if it's appropriate
-   for it to be an immediate child node of IP. All nodes need to share
-   this algorithm."
-  )
-
 (defun divide-into-subsets (nodelist)
   "aye, here be magic.
    Returns a list of sublists of nodelist by some algorithm."
