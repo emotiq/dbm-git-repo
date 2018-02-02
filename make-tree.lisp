@@ -21,9 +21,9 @@
 (defun make-child-node (parent childIP nodelist)
   (send-admin-message childIP *standard-port* 'make-tree parent nodelist))
 
-(defun divide-into-subsets (nodelist)
+(defun divide-into-subsets (n nodelist)
   "aye, here be magic.
-   Returns a list of sublists of nodelist by some algorithm."
+   Returns a list of n sublists of nodelist by some algorithm."
   )
 
 (defun make-tree (parent nodelist)
