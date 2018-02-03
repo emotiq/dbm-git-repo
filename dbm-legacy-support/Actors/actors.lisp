@@ -230,11 +230,12 @@
 
 (defmethod actor-recv-timeout ((self actor) timer-id)
   ;; a timeout occurred... is it ours? If not, just ignore.
-  (let ((recv-info (actor-recv-info self)))
-    (when (and recv-info
-               (eq (recv-info-id recv-info) timer-id))
-      (enqueue-replay self recv-info)
-      (if-let (fn (recv-info-timeout-fn recv-info))
+  (let ((info (actor-recv-info self)))
+    (when (and info   ;; were we in a RECV?
+               (eq (recv-info-id info) timer-id)) ;; was it the same one as for timer?
+      (setf (actor-recv-info self) nil) ;; terminate RECV
+      (enqueue-replay self info)        ;; prep for life after RECV
+      (if-let (fn (recv-info-timeout-fn info))
           (funcall fn)
         (error "RECV Timeout")))))
          
@@ -294,7 +295,7 @@
 
           (t 
            ;; else - not a message we are looking for - stash it
-           (addq (recv-info-msgq recv-info) msg))
+           (addq (recv-info-msgq info) msg))
           )))
             
 ;; ------------------------------------------------------
@@ -319,8 +320,8 @@
      ;; another RECV clause. If not already in a RECV clause, activate
      ;; it. Otherwise stash it as an internal RECV message to be run
      ;; after the current RECV clause finishes.
-     (if-let (recv-info (actor-recv-info self))
-         (addq (recv-info-recvq recv-info) msg)
+     (if-let (info (actor-recv-info self))
+         (addq (recv-info-recvq info) msg)
        (actor-recv-setup self conds-fn timeout-fn timeout-expr)))
     
     (t (&rest msg)
