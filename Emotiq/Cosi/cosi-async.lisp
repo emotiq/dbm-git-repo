@@ -749,6 +749,7 @@
 
 (defparameter *lock-count* 0)
 
+#+:ALLEGRO
 (excl:def-fwrapper lock-wrap (&rest args)
   (incf *lock-count*)
   (excl:call-next-fwrapper))
