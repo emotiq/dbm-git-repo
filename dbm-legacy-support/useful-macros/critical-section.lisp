@@ -37,12 +37,11 @@
 
 #+:ALLEGRO
 (defmacro! defmonitor (clauses)
-  `(let* ((,g!lock (mp:make-process-lock))
-          (,g!lam  (lambda (&rest ,g!args)
-                     (mp:with-process-lock (,g!lock)
+  `(let ((,g!lam  (lambda (&rest ,g!args)
+                    (excl:critical-section (:non-smp :without-interrupts)
                        (dcase ,g!args
                          ,@clauses)))
-                   ))
+                  ))
      ,@(mapcar (lambda (clause)
                  (let ((fname (first clause)))
                    `(defun ,fname (&rest ,g!fargs)
