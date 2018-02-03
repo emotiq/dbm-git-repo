@@ -34,9 +34,13 @@
 ;; --------------------------------------------------------------------
 ;; for visual debugging...
 
-(defvar *malachite*  (comm:string-ip-address "10.0.1.6"))
-(defvar *dachshund*  (comm:string-ip-address "10.0.1.3"))
-(defvar *rambo*      (comm:string-ip-address "10.0.1.13"))
+(defun dotted-to-integer (string)
+  #+:LW (comm:string-ip-address string)
+  #+:OPENMCL (ccl::dotted-to-ipaddr string))
+
+(defvar *malachite*  (dotted-to-integer "10.0.1.6"))
+(defvar *dachshund*  (dotted-to-integer "10.0.1.3"))
+(defvar *rambo*      (dotted-to-integer "10.0.1.13"))
 
 #+:LISPWORKS
 (progn
@@ -104,7 +108,10 @@
     (dolist (tree (remove main-tree trees))
       (push tree (node-bins main-tree)))
     (with-open-file (f (merge-pathnames
-                        (sys:get-folder-path :documents)
+                        #+:LW
+                         (sys:get-folder-path :documents)
+                         #+:OPENMCL
+                         "~/Documents/"
                         (or fname *default-data-file*))
                        :direction :output
                        :if-does-not-exist :create
@@ -114,15 +121,19 @@
                   :real-nodes ,real-nodes
                   :groups     ,grps)
                 f)))
-    (view-tree main-tree)
+    #+:LW (view-tree main-tree)
     main-tree))
 
   
 (defun reconstruct-tree (&key fname)
   (let* ((data        (read-from-string
-                       (file-string
+                       (#+:OPENMCL uiop/stream::read-file-string
+                        #+:LW file-string
                         (merge-pathnames
+                         #+:LW
                          (sys:get-folder-path :documents)
+                         #+:OPENMCL
+                         "~/Documents/"
                          (or fname *default-data-file*)))))
          (leader      (getf data :leader))
          (real-nodes  (getf data :real-nodes))
@@ -134,5 +145,5 @@
           trees)
     (dolist (tree (remove main-tree trees))
       (push tree (node-bins main-tree)))
-    (view-tree main-tree)
+    #+:LW (view-tree main-tree)
     main-tree))
