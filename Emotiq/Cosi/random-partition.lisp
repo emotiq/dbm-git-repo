@@ -1,4 +1,5 @@
 
+(declaim (optimize (debug 3)))
 
 (defvar *bins-per-node* 9)
 
@@ -14,7 +15,7 @@
 (defun partition (v0 vlist)
   (if vlist
       (let* ((dists (mapcar (um:curry 'logxor v0) vlist))
-             (bins  (make-array *bins-per-node*)))
+             (bins  (make-array *bins-per-node* :initial-element nil)))
         (mapc (lambda (dist v)
                 (push v (aref bins (mod dist *bins-per-node*))))
               dists vlist)
