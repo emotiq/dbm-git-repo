@@ -356,6 +356,7 @@
    #:ref
    #:with-timeout
    #:defmonitor
+   #:critical-section
    #:with-spinlock
    #:defsponitor
    

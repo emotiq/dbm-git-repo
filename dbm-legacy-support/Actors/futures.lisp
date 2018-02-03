@@ -127,6 +127,7 @@
               (mpcompat:CAS (cell-casflag ref) :in-process :uneval)))
            
            ((not *spin-wait*)
+            ;; :CLOZURE ?? -- will default to spinning
 	    #+:ALLEGRO
 	    (mp:process-wait "" #'ok-to-proceed)
 	    #+:LISPWORKS

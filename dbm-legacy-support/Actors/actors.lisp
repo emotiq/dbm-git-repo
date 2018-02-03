@@ -30,10 +30,11 @@
   )
            
 ;; ----------------------------------------------------
-;; An Actor mailbox contains a regular priority mailbox plus a list of
-;; previously stashed messages. Stashed messages will be read before
-;; additional mailbox messages. Message may become stashed, e.g.,
-;; during operation of a selective RECV.
+;; An Actor mailbox contains a priority queue holding newly delivered
+;; messages, plus a list of previously stashed messages in arrival
+;; order. Stashed messages will be read before additional enqueued
+;; messages. Message may become stashed, e.g., during operation of a
+;; selective RECV.
 
 (defclass actor-mailbox ()
   ((mbox   :reader   actor-message-mbox
@@ -66,7 +67,7 @@
 
 ;; -----------------------------------------------------
 ;; Version 3... make the Actor's internal state more readily visible
-;; to debuggers.
+;; to debuggers. Use a CLOS object instead of closed over lambda vars.
 
 (defclass actor ()
   ((properties
@@ -87,7 +88,7 @@
     :initform  (make-instance 'actor-mailbox))
    (recv-info
     ;; when non-nil this points to the RECV block in control. Only the
-    ;; Actor queries so SMP safety not a concern on this slot.
+    ;; Actor queries this slot so SMP safety not a concern.
     :accessor  actor-recv-info
     :initform  nil)
    (busy
@@ -192,14 +193,22 @@
 ;; to one of these control blocks.
 
 (defclass recv-info ()
-  ((id          :reader   recv-info-id
+  ;; unique token used to associate timeouts with corresponding RECV
+  ;; sessions
+  ((id          :reader   recv-info-id          
                 :initarg  :id)
-   (recvq       :reader   recv-info-recvq
+   ;; a list of pending successive RECV's
+   ;; no need for SMP safety here - only modified by active Actor
+   (recvq       :reader   recv-info-recvq       
                 :initform (make-unsafe-fifo))
-   (msgq        :reader   recv-info-msgq
+   ;; a list of incoming messages that didn't match
+   ;; no need for SMP safety here - only modified by active Actor   
+   (msgq        :reader   recv-info-msgq 
                 :initform (make-unsafe-fifo))
-   (selector-fn :reader   recv-info-selector-fn
+   ;; a function to screen messages for match
+   (selector-fn :reader   recv-info-selector-fn 
                 :initarg  :selector-fn)
+   ;; the function to invoke on a timeout
    (timeout-fn  :reader   recv-info-timeout-fn
                 :initarg  :timeout-fn)
    ;; currently active timer - when nil => none
@@ -216,8 +225,8 @@
   ;; This method overrides the one for the Actor's mailbox
   (enqueue-replay (actor-mailbox self)
                   (nconc (contents (recv-info-recvq info))
-                         (contents (recv-info-msgq  info))))
-  (setf (actor-recv-info self) nil)) ;; revert to non-RECV behavior
+                         (contents (recv-info-msgq  info)))
+                  ))
 
 (defmethod actor-recv-timeout ((self actor) timer-id)
   ;; a timeout occurred... is it ours? If not, just ignore.
@@ -246,11 +255,13 @@
 ;; Timeout Timers...
 
 (defun send-timeout-message (self this-id)
-  (when (readout-timer (actor-recv-info self) this-id)
-    ;; are we still awaited?
-    (send self
-          :recv-timeout-{3A95A26E-D84E-11E7-9D93-985AEBDA9C2A}
-          this-id)))
+  (let ((info (actor-recv-info self)))
+    (when (and info ;; still in a RECV?
+               (readout-timer info this-id)) ;; still awaited?
+      (send self
+            :recv-timeout-{3A95A26E-D84E-11E7-9D93-985AEBDA9C2A}
+            this-id))
+    ))
 
 (defun make-timeout-timer (delta self this-id)
   (when delta
@@ -261,29 +272,30 @@
 
 (defmethod readout-timer ((info recv-info) tid)
   ;; destructively read out the timer
-  (when info
-    ;; might not be any info by now...
-    (when (eq tid (recv-info-id info))
-      ;; might be a new timer info block...
-      (shiftf (recv-info-timer info) nil))))
-
-(defmethod kill-timer ((info recv-info))
-  (when-let (timer (readout-timer info (recv-info-id info)))
-    (unschedule-timer timer)))
+  ;; if it matches the one for session tid
+  (when (eq tid (recv-info-id info))
+    ;; yes, this is sloppy MP, but harmless
+    (shiftf (recv-info-timer info) nil)))
 
 ;; -------------------------------------------------------------
 
 (defmethod actor-recv-test-message ((self actor) msg)
   ;; see if the incoming message matches one of our RECV handlers
-  (let* ((recv-info (actor-recv-info self))
-         (ans-fn    (funcall (recv-info-selector-fn recv-info) msg)))
-    (if ans-fn
-        (progn
-          (kill-timer recv-info)
-          (enqueue-replay self recv-info)
-          (funcall ans-fn))
-      ;; else - not a message we are looking for
-      (addq (recv-info-msgq recv-info) msg))))
+  (let* ((info   (actor-recv-info self))
+         (ans-fn (funcall (recv-info-selector-fn info) msg)))
+    (cond (ans-fn
+           (setf (actor-recv-info self) nil) ;; revert to non-RECV behavior
+           (when-let (timer (readout-timer info
+                                           (recv-info-id info)))
+             ;; otherwise, we never had one, or else timeout just fired
+             (unschedule-timer timer))
+           (enqueue-replay self info) ;; prep for life after RECV
+           (funcall ans-fn))          ;; handle the message
+
+          (t 
+           ;; else - not a message we are looking for - stash it
+           (addq (recv-info-msgq recv-info) msg))
+          )))
             
 ;; ------------------------------------------------------
 ;; The main outer dispatch method for all Actors. It is here that we
@@ -550,7 +562,6 @@
 (defvar *executive-counter*  0)   ;; just a serial number on Executive threads
 (defvar *heartbeat-interval* 1)   ;; how often the watchdog should check for system stall
 (defvar *maximum-age*        3)   ;; how long before watchdog should bark
-#||#
 (defvar *nbr-execs*               ;; should match the number of CPU Cores
   #+(AND :LISPWORKS :MACOSX)
   (load-time-value
@@ -563,8 +574,6 @@
   #+:CLOZURE
   (ccl:cpu-count)
   #-(or :CLOZURE (AND :LISPWORKS :MACOSX)) 4)
-#||#
-;; (defvar *nbr-execs*   16)            ;; for now while we are testing...
 
 ;; ----------------------------------------------------------------
 ;; Ready Queue
@@ -668,7 +677,7 @@
 |#
 
 (defmonitor
-    ;; All under a global lock
+    ;; All under a global lock - called infrequently
     ((terminate-actor (actor)
        (dolist (exec *executive-processes*)
          (mp:process-interrupt exec 'exec-terminate-actor actor)))

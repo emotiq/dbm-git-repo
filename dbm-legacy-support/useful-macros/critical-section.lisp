@@ -18,6 +18,23 @@
 ;; in an outer list.
 
 #+:LISPWORKS
+(defmacro! critical-section (&body body)
+  `(let ((,g!lock  (load-time-value (mp:make-lock))))
+     (mp:with-lock (,g!lock)
+       ,@body)))
+
+#+:CLOZURE
+(defmacro! critical-section (&body body)
+  `(let ((,g!lock  (load-time-value (ccl:make-lock))))
+     (ccl:with-lock-grabbed (,g!lock)
+        ,@body)))
+
+#+:ALLEGRO
+(defmacro! critical-section (&body body)
+  `(excl:critical-section (:non-smp :without-interrupts)
+     ,@body))
+
+#+:LISPWORKS
 (defmacro! defmonitor (clauses)
   `(let* ((,g!lock (mp:make-lock))
           (,g!lam  (lambda (&rest ,g!args)

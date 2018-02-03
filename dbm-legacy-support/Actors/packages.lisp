@@ -64,6 +64,7 @@
    #:dlambda
    #:dcase
    #:defmonitor
+   #:critical-section
    #:capture-ans-or-exn
    #:recover-ans-or-exn
    #:<shared-plist>
