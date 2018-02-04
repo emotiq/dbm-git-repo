@@ -47,6 +47,12 @@
              :initform nil)
    ))
 
+;; For now, 4 different ways to specify a node:
+;;   1. node structure pointer
+;;   2. IPv4 address (in dotted string notation)
+;;   3. UUID (needs uuid-to-integer for keying *uuid-node* table)
+;;   4. PKEY (compressed public key ECC point)
+
 ;; XREF from IPv4 address to Tree Node
 (defvar *ip-node*   (make-hash-table :test 'equal))
 (defvar *uuid-node* (make-hash-table))
@@ -67,6 +73,7 @@
           (gethash (third pkeyzkp) *pkey-node*) node)))
 
 (defun need-to-specify (&rest args)
+  (declare (ignore args))
   (error "Need to specify..."))
 
 (defun dotted-string-to-integer (string)
