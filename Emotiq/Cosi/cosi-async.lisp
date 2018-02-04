@@ -746,6 +746,9 @@
        (declare (dynamic-extent #',g!fun))
        (do-wall-time #',g!fun))))
 
+(defmacro xtime (form)
+  form)
+
 (defun tst (&optional (n 100))
   (set-cores 4)
   (organic-build-tree n)
@@ -761,7 +764,7 @@
               (format t "~%Create ~a node multi-signature" n)
               (wall-time
                (send *top-node* :cosi mbox msg)
-               (time (setf *x* (mpcompat:mailbox-read mbox)))))
+               (xtime (setf *x* (mpcompat:mailbox-read mbox)))))
         (print "------------------------------------------------")
         (set-cores 1)
         (print "1 Executive")
@@ -769,7 +772,7 @@
               (format t "~%Create ~a node multi-signature" n)
               (wall-time
                (send *top-node* :cosi mbox msg)
-               (time (setf *x* (mpcompat:mailbox-read mbox)))))
+               (xtime (setf *x* (mpcompat:mailbox-read mbox)))))
               
         (print "------------------------------------------------")
         (print "Verify signature")
