@@ -829,34 +829,36 @@
   
 ;; ------------------------------------------------
 
-(defun par (cbfn fns)
-  (let* ((cbfn  (=cont cbfn))
-         (len   (length fns))
+(=defun par (fns)
+  ;; perform fns in parallel. Each fn in fns should return via =VALUES
+  (let* ((len   (length fns))
          (count (list len))
          (ansv  (make-array len)))
     (labels ((done (ix ans)
                (setf (aref ansv ix) ans)
                (when (zerop (mpcompat:atomic-decf (car (the cons count))))
-                 (apply cbfn (coerce ansv 'list)))))
+                 (=values (coerce ansv 'list))))
+             (callback (ix)
+               (lambda (ans)
+                 (done ix ans))))
       (if fns
           (loop for fn in fns
                 for ix from 0
                 do
-                (spawn (lambda (n fn)
-                         (done n (funcall fn)))
-                       ix fn))
+                (spawn fn (callback ix)))
         ;; else - nothing to do
-        (funcall cbfn)))
+        (=values nil)))
     ))
 
 (defmacro with-futures (args forms &body body)
   ;; Be careful here... Actors are generally incompatible with
   ;; parallel concurrent access to their internal state. But if you
   ;; know what you are doing...
-  `(par
-     (lambda ,args
-       ,@body)
-     (list ,@(mapcar #`(lambda () ,a1) forms)) ))
+  (let ((g!list (gensym)))
+    `(=bind (,g!list)
+         (par ,@(mapcar #`(=lambda () (=values ,a1)) forms))
+       (multiple-value-bind ,args (values-list ,g!list)
+         ,@body))))
 
 #+:LISPWORKS
 (editor:setup-indent "with-futures" 2)
@@ -864,98 +866,46 @@
 ;; ----------------------------------------------------
 
 (defun trn (mat)
+  ;; transpose of list-form matrix
   (apply 'mapcar 'list mat))
 
-(defun pmapcar (cbfn fn &rest lists)
-  ;; Parallel mapcar - calls cbfn with a result list.
+(=defun pmapcar (fn &rest lists)
+  ;;
+  ;; Parallel mapcar - returns a result list.
   ;; Use like PAR for indefinite number of parallel forms,
-  ;; each of which is the same function against different args.
-  (let* ((cbfn   (=cont cbfn))
-         (grps   (trn lists))
+  ;; each of which is the same function applied to different args.
+  ;;
+  ;; The function fn should return via =VALUES
+  ;;
+  (let* ((grps   (trn lists))
          (len    (length grps))
          (count  (list len))
          (ansv   (make-array len)))
     (labels ((done (ix ans)
                (setf (aref ansv ix) ans)
                (when (zerop (mpcompat:atomic-decf (car (the cons count))))
-                 (funcall cbfn (coerce ansv 'list)))))
+                 (=values (coerce ansv 'list))))
+             (callback (ix)
+               (lambda (ans)
+                 (done ix ans))))
       (if grps
           (loop for grp in grps
                 for ix from 0
                 do
-                (spawn (lambda (n grp)
-                         (done n (apply fn grp)))
-                       ix grp))
+                (spawn (=lambda (grp)
+                         (=apply fn grp))
+                       (callback ix) grp))
         ;; else - empty lists, nothing to do
-        (funcall cbfn nil)))
+        (=values nil)))
     ))
-
-(defmacro =pmapcar (fn &rest lists)
-  `(pmapcar %sk ,fn ,@lists))
-       
-#+:LISPWORKS
-(editor:setup-indent "=pmapcar" 2)
-
-#| ;; for example - query a bunch of remote nodes
-(=bind (lst)
-    (=pmapcar (lambda (node)
-                (send node :query))
-        nodes)
-  (do-something-with-result lst))
-|#
-
-;; -----------------------------------------------------------------------
-
-(=defun apar-map (node-maker-fn &rest lists)
-  ;;
-  ;; APAR-MAP - an async par-map -- works just like mapcar, but in
-  ;; parallel async, suitable for =bind.
-  ;;
-  ;; The node-maker-fn should take a continuation arg and args
-  ;; selected from each list, as if defined by =defun or =lambda.
-  ;;
-  ;; But rather than passing the =defun name, you *must* use the =name
-  ;; as it is an actual function. The node-maker-fn should return a
-  ;; closure that will be spawned to perform the actual work.
-  ;;
-  ;; The worker function, in the returned closure, should return by
-  ;; =values.
-  ;;
-  ;; The final returned value from APAR-MAP is a list returned to its
-  ;; caller via =values. This is a different callback from the ones
-  ;; fabricated for each worker node, and used for their =values.
-  ;;
-  ;;   (node = Actor, since node is a spawned function).
-  ;;
-  (let ((grps (trn lists)))
-    (if grps
-        (let* ((len   (length grps))
-               (count (list len))
-               (ansv  (make-array len)))
-          (labels ((done (ix ans)
-                     (setf (aref ansv ix) ans)
-                     (when (zerop (mpcompat:atomic-decf (car (the cons count))))
-                       (=values (coerce ansv 'list))))
-                   (callback (ix)
-                     (lambda (ans)
-                       (done ix ans))))
-            (loop for grp in grps
-                  for ix from 0
-                  do
-                  (spawn (apply node-maker-fn (callback ix) grp))
-                  )))
-      ;; else - no nodes
-      (=values nil)
-      )))
 
 #|
   ;; example...
 (=bind (lst)
-    (apar-map (=lambda (x y)
-                (lambda ()
-                  (=values (list x y))))
-              '(a b c)
-              '(1 2 3))
+    (pmapcar (=lambda (x y)
+               (=values (list x y)))
+             '(a b c)
+             '(1 2 3))
   (print lst))
 ==> '((a 1) (b 2) (c 3))
   |#

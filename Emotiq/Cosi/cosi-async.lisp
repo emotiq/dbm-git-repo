@@ -32,7 +32,7 @@
    :=lambda
    :=funcall
    :=apply
-   :apar-map
+   :pmapcar
    :spawn
    :current-actor
    :recv
@@ -405,29 +405,20 @@
 
 ;; -----------------------------------------------------------------------
 
-(=defun map-nodes (node-fn nodes &rest args)
-  ;; async parallel mapping of node-fn across list of nodes, with args
-  ;; applied to each node
-  (apar-map (=lambda (node)
-              (lambda ()
-                (=apply node-fn node args)))
-            nodes))
-
-;; -----------------------------------------------------------------------
-
-(=defun sub-commitment (node seq-id msg timeout)
-  (let ((self (current-actor)))
-    (send node :commitment self seq-id msg)
-    (recv
-      ((list* :commit ans)
-       (=values ans))
-
-      :TIMEOUT timeout
-      :ON-TIMEOUT (progn
-                    (become 'do-nothing)
-                    (=values nil))
-      )))
-
+(defun sub-commitment (seq-id msg timeout)
+  (=lambda (node)
+    (let ((self (current-actor)))
+      (send node :commitment self seq-id msg)
+      (recv
+        ((list* :commit ans)
+         (=values ans))
+        
+        :TIMEOUT timeout
+        :ON-TIMEOUT (progn
+                      (become 'do-nothing)
+                      (=values nil))
+        ))))
+    
 (defun node-make-cosi-commitment (state reply-to seq-id msg)
   ;;
   ;; First phase of Cosi:
@@ -445,8 +436,7 @@
         (setf state-v v) ;; hold secret random seed
         (let ((tparts (list state-id)))
           (=bind (lst)
-              (map-nodes '=sub-commitment state-subs
-                         seq-id msg state-timeout)
+              (pmapcar (sub-commitment seq-id msg state-timeout) state-subs)
             (labels ((fold-answer (ans node)
                        (cond ((null ans)
                               (mark-node-no-response state node))
@@ -462,22 +452,23 @@
               ))))
       )))
 
-(=defun sub-signing (node seq-id c timeout)
-  (let ((self (current-actor)))
-    (send node :signing self seq-id c)
-    (recv
-      ((list :signed ans)
-       (=values ans))
-      ((list (or :missing-node
-                 :invalid-commitment))
-       (=values nil))
-
-      :TIMEOUT timeout
-      :ON-TIMEOUT (progn
-                    (become 'do-nothing)
-                    (=values nil))
-      )))
-
+(defun sub-signing (seq-id c timeout)
+  (=lambda (node)
+    (let ((self (current-actor)))
+      (send node :signing self seq-id c)
+      (recv
+        ((list :signed ans)
+         (=values ans))
+        ((list (or :missing-node
+                   :invalid-commitment))
+         (=values nil))
+        
+        :TIMEOUT timeout
+        :ON-TIMEOUT (progn
+                      (become 'do-nothing)
+                      (=values nil))
+        ))))
+    
 (defun node-compute-signature (state reply-to seq-id c)
   ;;
   ;; Second phase of Cosi:
@@ -492,8 +483,7 @@
       (let ((r  (sub-mod *ed-r* state-v (mult-mod *ed-r* c state-skey)))
             (missing nil))
         (=bind (lst)
-            (map-nodes '=sub-signing state-parts
-                       seq-id c state-timeout)
+            (pmapcar (sub-signing seq-id c state-timeout) state-parts)
           (labels ((fold-answer (ans node)
                      (cond ((null ans)
                             (mark-node-no-response state node)
