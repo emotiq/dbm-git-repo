@@ -729,19 +729,34 @@
 
 (defvar *x* nil) ;; saved result for inspection
 
+(defun set-cores (n)
+  (setf ac:*nbr-execs* n)
+  (ac::kill-executives))
+
 (defun tst (&optional (n 100))
-    (organic-build-tree n)
-  
+  (set-cores 4)
+  (organic-build-tree n)
+    
     #+:LISPWORKS
     (view-tree *top-node*)
 
+    (print "------------------------------------------------")
     (let ((msg "this is a test"))
       (with-borrowed-mailbox (mbox)
+        (print "4 Executives")
         (loop repeat 3 do
               (format t "~%Create ~a node multi-signature" n)
               (send *top-node* :cosi mbox msg)
               (time (setf *x* (mpcompat:mailbox-read mbox))))
-
+        (print "------------------------------------------------")
+        (set-cores 1)
+        (print "1 Executive")
+        (loop repeat 3 do
+              (format t "~%Create ~a node multi-signature" n)
+              (send *top-node* :cosi mbox msg)
+              (time (setf *x* (mpcompat:mailbox-read mbox))))
+        
+        (print "------------------------------------------------")
         (print "Verify signature")
         (values (ask *top-node* :validate msg (third *x*)) :done)
         ))

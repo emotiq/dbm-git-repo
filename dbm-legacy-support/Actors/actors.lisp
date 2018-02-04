@@ -495,9 +495,11 @@
       (release-mailbox mbox))))
 
 (defmacro with-borrowed-mailbox ((mbox) &body body)
-  `(do-with-borrowed-mailbox
-    (lambda (,mbox)
-      ,@body)))
+  (let ((g!func (gensym)))
+    `(flet ((,g!func (,mbox)
+              ,@body))
+       (declare (dynamic-extent #',g!func))
+       (do-with-borrowed-mailbox #',g!func))))
 
 #+:LISPWORKS
 (editor:setup-indent "with-borrowed-mailbox" 1)
@@ -579,64 +581,15 @@
 ;; ----------------------------------------------------------------
 ;; Ready Queue
 
-(defconstant +wait-property+ 'waiting-for-actor)
-
-#+:LISPWORKS
-(defun pop-ready-queue ()
-  ;; while awaiting a function to perform from the Actor ready queue,
-  ;; we indicate our waiting with a process property that can be
-  ;; queried by the system watchdog timer.
-  (prog2
-      (setf (mp:process-property +wait-property+) t)
-      (mailbox-read *actor-ready-queue*)
-    (setf (mp:process-property +wait-property+) nil
-          *last-heartbeat* (get-universal-time))))
-
-#+:LISPWORKS
-(defun waiting-for-actor-p (proc)
-  (mp:process-property +wait-property+ proc))
-
-#+:ALLEGRO
-(defun pop-ready-queue ()
-  ;; while awaiting a function to perform from the Actor ready queue,
-  ;; we indicate our waiting with a process property that can be
-  ;; queried by the system watchdog timer.
-  (let* ((proc  (mpcompat:current-process)))
-    (setf (getf (mp:process-property-list proc) +wait-property+) t)
-    (let ((ans (mailbox-read *actor-ready-queue*)))
-      (setf (getf (mp:process-property-list proc) +wait-property+) nil
-            *last-heartbeat* (get-universal-time))
-      ans)))
-
-#+:ALLEGRO
-(defun waiting-for-actor-p (proc)
-  (getf (mp:process-property-list proc) +wait-property+))
-
-
-#+:CLOZURE
-(defun pop-ready-queue ()
-  ;; while awaiting a function to perform from the Actor ready queue,
-  ;; we indicate our waiting with a process property that can be
-  ;; queried by the system watchdog timer.
-  (let* ((proc  (mpcompat:current-process)))
-    (setf (mpcompat:process-property +wait-property+ proc) t)
-    (let ((ans (mailbox-read *actor-ready-queue*)))
-      (setf (mpcompat:process-property +wait-property+ proc) nil
-            *last-heartbeat* (get-universal-time))
-      ans)))
-
-#+:CLOZURE
-(defun waiting-for-actor-p (proc)
-  (mpcompat:process-property +wait-property+ proc))
-
 ;; ------------------------------------------------------------
 ;; Executive Actions
 
 (defun executive-loop ()
   ;; the main executive loop
   (unwind-protect
-      (loop for fn = (pop-ready-queue)
+      (loop for fn = (mailbox-read *actor-ready-queue*) ;; (pop-ready-queue)
             do
+            (setf *last-heartbeat* (get-universal-time))
             (restart-case
                 (funcall fn)
               (:terminate-actor ()
@@ -650,9 +603,6 @@
     (throw :terminate-actor nil)))
 
 ;; --------------------------------------------------------------
-
-(defun ready-queue-empty-p ()
-  (mailbox-empty-p *actor-ready-queue*))
 
 (defun empty-ready-queue ()
   ;; this is a support routine, to be called only from the safe
@@ -685,10 +635,8 @@
      
      (check-sufficient-execs ()
        (let (age)
-         (unless (or (null *executive-processes*) ;; not running the Actor system?
-		     (ready-queue-empty-p)        ;; nothing to do anyway?
-                     (find-waiting-executive)     ;; an available Executive thread?
-                     (< (setf age (- (get-universal-time) ;; been stalled long enough?
+         (unless (or (emptyq-p *actor-ready-queue*)        ;; nothing to do anyway?
+                     (< (setf age (- (get-universal-time)  ;; been stalled long enough?
 				     *last-heartbeat*))
 			*maximum-age*))
            ;; -------------------------------------------
@@ -733,9 +681,6 @@
                 ))
             ))))
 
-     (find-waiting-executive ()
-       (some 'waiting-for-actor-p *executive-processes*))
-
      (remove-from-pool (proc)
        (setf *executive-processes* (delete proc *executive-processes*)))
      
@@ -754,7 +699,7 @@
          (setf *last-heartbeat* (get-universal-time))
          (schedule-timer-relative
           *heartbeat-timer*
-          *heartbeat-interval*
+          *maximum-age*
           *heartbeat-interval*)))
 
      (ensure-executives ()

@@ -44,6 +44,7 @@
    #:mailbox-empty-p
    #:make-unsafe-fifo
    #:make-priq
+   #:make-fifo
    #:addq
    #:popq
    #:emptyq-p

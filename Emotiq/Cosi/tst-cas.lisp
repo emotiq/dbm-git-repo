@@ -36,11 +36,11 @@
 (defun do-ustime (fnx fn0 &optional (n 1))
   (labels ((timeit (fn)
              (let ((start (usec:get-time-usec)))
-               (sys:with-other-threads-disabled
+               (progn ;; sys:with-other-threads-disabled
                  (loop repeat n do
                        (funcall fn))
                  (let ((stop (usec:get-time-usec)))
-                   (- stop start)))))
+                   (- stop start))))))
     (let ((dtxs  (make-array 3))
           (dt0s  (make-array 3)))
       (loop for ix from 0 below 3 do
@@ -54,7 +54,7 @@
                            2))))
         (values (float (/ mn n))
                 (float (/ sd n)))
-        )))))
+        ))))
 
 #+:LISPWORKS
 (defmacro ustime ((&optional (n 1)) formx form0)
