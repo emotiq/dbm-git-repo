@@ -733,6 +733,19 @@
   (setf ac:*nbr-execs* n)
   (ac::kill-executives))
 
+(defun do-wall-time (fn)
+  (let ((start (get-universal-time)))
+    (funcall fn)
+    (let ((stop (get-universal-time)))
+      (format t "~%WallClock Elapsed Time: ~Ds" (- stop start)))))
+       
+(defmacro wall-time (&body body)
+  (let ((g!fun  (gensym)))
+    `(flet ((,g!fun ()
+              ,@body))
+       (declare (dynamic-extent #',g!fun))
+       (do-wall-time #',g!fun))))
+
 (defun tst (&optional (n 100))
   (set-cores 4)
   (organic-build-tree n)
@@ -746,16 +759,18 @@
         (print "4 Executives")
         (loop repeat 3 do
               (format t "~%Create ~a node multi-signature" n)
-              (send *top-node* :cosi mbox msg)
-              (time (setf *x* (mpcompat:mailbox-read mbox))))
+              (wall-time
+               (send *top-node* :cosi mbox msg)
+               (time (setf *x* (mpcompat:mailbox-read mbox)))))
         (print "------------------------------------------------")
         (set-cores 1)
         (print "1 Executive")
         (loop repeat 3 do
               (format t "~%Create ~a node multi-signature" n)
-              (send *top-node* :cosi mbox msg)
-              (time (setf *x* (mpcompat:mailbox-read mbox))))
-        
+              (wall-time
+               (send *top-node* :cosi mbox msg)
+               (time (setf *x* (mpcompat:mailbox-read mbox)))))
+              
         (print "------------------------------------------------")
         (print "Verify signature")
         (values (ask *top-node* :validate msg (third *x*)) :done)
@@ -775,6 +790,33 @@
 
 (excl:fwrap 'mp:process-lock 'lock-wrapper 'lock-wrap)
 (excl:funwrap 'mp:process-lock 'lock-wrapper)
+
+(let* ((ncores '(1 4))
+       (acl    '(20 17))
+       (lwcl   '(18 25))
+       (ccl    '(47 25)))
+  (plt:plot 'plt ncores acl
+            :clear t
+            :title "(COSI:TST 1600) Timings vs Exec Pool"
+            :xtitle "Nbr Executives [threads]"
+            :ytitle "Duration of Test [sec]"
+            :yrange '(0 60)
+            :symbol :circle
+            :plot-joined t
+            :legend "ACL"
+            :color  :red)
+  (plt:plot 'plt ncores lwcl
+            :symbol :circle
+            :plot-joined t
+            :legend "LW"
+            :color  :darkgreen)
+  (plt:plot 'plt ncores ccl
+            :symbol :circle
+            :plot-joined t
+            :legend "CCL"
+            :color  :blue))
+
+               
 |#
 
 #|
