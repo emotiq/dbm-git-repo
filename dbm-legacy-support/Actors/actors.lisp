@@ -829,42 +829,6 @@
   
 ;; ------------------------------------------------
 
-(=defun par (fns)
-  ;; perform fns in parallel. Each fn in fns should return via =VALUES
-  (let* ((len   (length fns))
-         (count (list len))
-         (ansv  (make-array len)))
-    (labels ((done (ix ans)
-               (setf (aref ansv ix) ans)
-               (when (zerop (mpcompat:atomic-decf (car (the cons count))))
-                 (=values (coerce ansv 'list))))
-             (callback (ix)
-               (lambda (ans)
-                 (done ix ans))))
-      (if fns
-          (loop for fn in fns
-                for ix from 0
-                do
-                (spawn fn (callback ix)))
-        ;; else - nothing to do
-        (=values nil)))
-    ))
-
-(defmacro with-futures (args forms &body body)
-  ;; Be careful here... Actors are generally incompatible with
-  ;; parallel concurrent access to their internal state. But if you
-  ;; know what you are doing...
-  (let ((g!list (gensym)))
-    `(=bind (,g!list)
-         (par ,@(mapcar #`(=lambda () (=values ,a1)) forms))
-       (multiple-value-bind ,args (values-list ,g!list)
-         ,@body))))
-
-#+:LISPWORKS
-(editor:setup-indent "with-futures" 2)
-
-;; ----------------------------------------------------
-
 (defun trn (mat)
   ;; transpose of list-form matrix
   (apply 'mapcar 'list mat))
@@ -875,7 +839,11 @@
   ;; Use like PAR for indefinite number of parallel forms,
   ;; each of which is the same function applied to different args.
   ;;
-  ;; The function fn should return via =VALUES
+  ;; The function fn should be defined with =DEFUN or =LAMBDA, and
+  ;; return via =VALUES
+  ;;
+  ;; PMAPCAR is intended for use within an =BIND
+  ;;  (see example below)
   ;;
   (let* ((grps   (trn lists))
          (len    (length grps))
@@ -899,8 +867,42 @@
         (=values nil)))
     ))
 
+(defmacro par (&rest clauses)
+  ;; PAR - perform clauses in parallel
+  ;; This is intended for use within an =BIND clause
+  ;;  (example below in WITH-FUTURES)
+  `(pmapcar (=lambda (fn)
+              (=values (funcall fn)))
+            (list ,@(mapcar #`(lambda () ,a1) clauses))))
+
+(defmacro with-futures (args forms &body body)
+  (let ((g!list (gensym)))
+    `(=bind (,g!list)
+         (par ,@forms)
+       (multiple-value-bind ,args (values-list ,g!list)
+         ,@body))))
+
+#+:LISPWORKS
+(editor:setup-indent "with-futures" 2)
+
 #|
-  ;; example...
+;; examples...
+  
+(=bind (lst)
+    (par
+      (sin 1)
+      (sin 2)
+      (sin 3))
+  (pr (reduce '+ lst)))
+=> 1.8918884
+
+(with-futures (a b c)
+    ((sin 1)
+     (sin 2)
+     (sin 3))
+  (pr (+ a b c)))
+=> 1.8918884
+
 (=bind (lst)
     (pmapcar (=lambda (x y)
                (=values (list x y)))
@@ -908,4 +910,18 @@
              '(1 2 3))
   (print lst))
 ==> '((a 1) (b 2) (c 3))
-  |#
+
+(=bind (lst)
+    (pmapcar (=lambda (v)
+               (=values (sin v)))
+             '(1 2 3))
+  (pr (reduce '+ lst)))
+=> 1.8918884
+
+(=bind (lst)
+    (pmapcar (=lambda (fn)
+               (=values (funcall fn 1)))
+             '(sin cos tan))
+  (pr lst))
+=> (0.84147096 0.5403023 1.5574077)
+|#
