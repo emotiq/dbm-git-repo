@@ -1,3 +1,7 @@
+;; random-partition.lisp -- Generate simulation trees of network nodes for Cosi
+;;
+;; DM/Emotiq 02/18
+;; -------------------------------------------------------------------------
 
 (declaim (optimize (debug 3)))
 
@@ -14,7 +18,7 @@
 ;; ----------------------------------------------------------------------
 ;; Network Tree Nodes
 
-(defvar *bins-per-node* 9)
+(defvar *bins-per-node* 9) ;; prolly needs to be >3 for BFT
 
 (defclass node ()
   ((ip       :accessor node-ip
