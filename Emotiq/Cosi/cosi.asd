@@ -5,6 +5,8 @@
 
 (in-package :cl-user)
 
+#+:ALLEGRO (require :sock)
+
 (asdf:defsystem "cosi"
   :description "Cosi: Authenticated multi-signatures in Lisp"
   :version     "1.0"
@@ -24,6 +26,5 @@
                  :lisp-object-encoder
                  :useful-macros
                  #+:LISPWORKS :butterfly
-                 #+:ALLEGRO :sock
                  ))
 

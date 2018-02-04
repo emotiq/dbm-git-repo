@@ -33,7 +33,7 @@
              :initarg  :ip)
    (uuid     :accessor node-uuid     ;; UUID for this node
              :initarg  :uuid)
-   (pkeyzkp  :reader    node-pkeyzkp ;; public key + ZKP
+   (pkeyzkp  :reader   node-pkeyzkp  ;; public key + ZKP
              :initarg  :pkeyzkp)
    (skey     :reader   node-skey     ;; private key
              :initarg  :skey)
@@ -48,8 +48,8 @@
    ))
 
 ;; XREF from IPv4 address to Tree Node
-(defvar *ip-node*   (make-hash-table :test 'string=))
-(defvar *uuid-node* (make-hash-table :test 'uuid:uuid=))
+(defvar *ip-node*   (make-hash-table :test 'equal))
+(defvar *uuid-node* (make-hash-table))
 (defvar *pkey-node* (make-hash-table))
 
 (defvar *pkey-skey* (make-hash-table))
@@ -63,10 +63,10 @@
                              :parent  parent
                              )))
     (setf (gethash ipstr *ip-node*)   node
-          (gethash uuid  *uuid-node*) node
+          (gethash (uuid:uuid-to-integer uuid) *uuid-node*) node
           (gethash (third pkeyzkp) *pkey-node*) node)))
 
-(defun need-to-specify ()
+(defun need-to-specify (&rest args)
   (error "Need to specify..."))
 
 (defun dotted-string-to-integer (string)
@@ -269,7 +269,7 @@
   (let* ((keys        (read-from-string
                        (#+:OPENMCL   uiop/stream::read-file-string
                         #+:LISPWORKS hcl:file-string
-                        #+:ALLEGRO   (need-to-specify)
+                        #+:ALLEGRO   need-to-specify
                         (merge-pathnames
                          #+:LISPWORKS
                          (sys:get-folder-path :documents)
@@ -280,7 +280,7 @@
          (data        (read-from-string
                        (#+:OPENMCL   uiop/stream::read-file-string
                         #+:LISPWORKS hcl:file-string
-                        #+:ALLEGRO   (need-to-specify)
+                        #+:ALLEGRO   need-to-specify
                         (merge-pathnames
                          #+:LISPWORKS
                          (sys:get-folder-path :documents)
