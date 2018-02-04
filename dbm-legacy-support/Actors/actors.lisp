@@ -860,9 +860,7 @@
           (loop for grp in grps
                 for ix from 0
                 do
-                (spawn (=lambda (grp)
-                         (=apply fn grp))
-                       (callback ix) grp))
+                (apply 'spawn fn (callback ix) grp))
         ;; else - empty lists, nothing to do
         (=values nil)))
     ))
