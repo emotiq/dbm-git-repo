@@ -43,6 +43,7 @@
   (:export
    :schnorr-signature
    :verify-schnorr-signature
+   :compute-pkey-zkp
    ))
 
 ;; -------------------------------------------------------
@@ -332,7 +333,15 @@
 (defun msg-ok (msg byz)
   (unless byz
     (or msg t)))
-    
+
+(defun compute-pkey-zkp (skey pkey)
+  (multiple-value-bind (v vpt) (ed-random-pair)
+    (let* ((c     (hash-pt-pt vpt pkey)) ;; Fiat-Shamir NIZKP challenge
+           (r     (sub-mod *ed-r* v
+                           (mult-mod *ed-r* skey c)))
+           (pcmpr (ed-compress-pt pkey)))
+      (list r c pcmpr)))) ;; NIZKP and public key
+
 (defun node-return-pkey+zkp (state reply-to)
   ;; In response to a query about this node's public key, compute a
   ;; ZKP to prove that we know the secret key, and return that proof
@@ -342,14 +351,9 @@
   ;;
   (with-node-state state
     (reply reply-to :pkey state-id
-           (or state-zkp 
-               (multiple-value-bind (v vpt) (ed-random-pair)
-                 (let* ((c     (hash-pt-pt vpt state-pkey)) ;; Fiat-Shamir NIZKP challenge
-                        (r     (sub-mod *ed-r* v
-                                        (mult-mod *ed-r* state-skey c)))
-                        (pcmpr (ed-compress-pt state-pkey)))
-                   (setf state-zkp (list r c pcmpr))) ;; NIZKP and public key
-                 )))))
+           (or state-zkp
+               (setf state-zkp (compute-pkey-zkp state-skey state-pkey)))
+           )))
 
 ;; ----------------------------------------------------------------------
 

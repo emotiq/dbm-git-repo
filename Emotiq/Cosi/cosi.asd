@@ -13,12 +13,17 @@
   :components  (
 		(:file "cosi-async")
 		;; (:file "cosi")
-		(:file "tst-cas")
+		;; (:file "tst-cas")
+                ;; (:file "cosi-socket")
+                (:file :random-partition)
                 )
   :SERIAL T
   :depends-on   (:ironclad
 		 :actors
                  :core-crypto
                  :lisp-object-encoder
-                 :useful-macros))
+                 :useful-macros
+                 #+:LISPWORKS :butterfly
+                 #+:ALLEGRO :sock
+                 ))
 

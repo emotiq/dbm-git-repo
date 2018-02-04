@@ -3,6 +3,14 @@
 ;; DM/Emotiq 02/18
 ;; -------------------------------------------------------------------------
 
+(defpackage :cosi-simgen
+  (:use :common-lisp :cosi)
+  (:export
+   :generate-tree
+   :reconstruct-tree))
+
+(in-package :cosi-simgen)
+
 (declaim (optimize (debug 3)))
 
 ;; --------------------------------------------------------------------
@@ -21,17 +29,20 @@
 (defvar *bins-per-node* 9) ;; prolly needs to be >3 for BFT
 
 (defclass node ()
-  ((ip       :accessor node-ip
+  ((ip       :accessor node-ip       ;; IPv4 string for this node
              :initarg  :ip)
-   (uuid     :accessor node-uuid
-             :initarg  :uuid
-             :initform (uuid:make-v1-uuid))
-   (realnode :accessor node-realnode
+   (uuid     :accessor node-uuid     ;; UUID for this node
+             :initarg  :uuid)
+   (pkeyzkp  :reader    node-pkeyzkp ;; public key + ZKP
+             :initarg  :pkeyzkp)
+   (skey     :reader   node-skey     ;; private key
+             :initarg  :skey)
+   (realnode :accessor node-realnode ;; t/f - t when this is a real IPv4 node, nil for fake
              :initform nil)
-   (parent   :accessor node-parent
+   (parent   :accessor node-parent   ;; points to node of group parent
              :initarg  :parent
              :initform nil)
-   (bins     :accessor node-bins
+   (bins     :accessor node-bins     ;; list of group members beyond self
              :initarg  :bins
              :initform nil)
    ))
@@ -39,15 +50,21 @@
 ;; XREF from IPv4 address to Tree Node
 (defvar *ip-node*   (make-hash-table :test 'string=))
 (defvar *uuid-node* (make-hash-table :test 'uuid:uuid=))
+(defvar *pkey-node* (make-hash-table))
 
-(defun make-node (ipstr uuid parent)
+(defvar *pkey-skey* (make-hash-table))
+
+(defun make-node (ipstr uuid pkeyzkp parent)
   (let ((node (make-instance 'node
-                             :ip     ipstr
-                             :uuid   uuid
-                             :parent parent
+                             :ip      ipstr
+                             :uuid    uuid
+                             :skey    (gethash (third pkeyzkp) *pkey-skey*)
+                             :pkeyzkp pkeyzkp
+                             :parent  parent
                              )))
     (setf (gethash ipstr *ip-node*)   node
-          (gethash uuid  *uuid-node*) node)))
+          (gethash uuid  *uuid-node*) node
+          (gethash (third pkeyzkp) *pkey-node*) node)))
 
 (defun need-to-specify ()
   (error "Need to specify..."))
@@ -62,37 +79,42 @@
   #+:OPENMCL   (need-to-specify)
   #+:ALLEGRO   (need-to-specify))
 
-(defun partition (ip vlist &optional parent)
-  (let* ((ipstr  (if (consp ip)
-                     (car ip)
-                   ip))
-         (uuid   (if (consp ip)
-                     (cdr ip)
-                   (uuid:make-v1-uuid)))
-         (node (make-node ipstr uuid parent)))
-    (when vlist
-      (let* ((ipv   (dotted-to-integer ipstr))
-             (dists (mapcar (lambda (v)
-                              (let ((vstr  (if (consp v)
-                                               (car v)
-                                             v))
-                                    (vuuid (if (consp v)
-                                               (cdr v)
-                                             (uuid:make-v1-uuid))))
-                                (logxor ipv (dotted-to-integer vstr))))
+(defun gen-node-id (ip)
+  (if (consp ip)
+      (values-list ip)
+    (multiple-value-bind (skey pkey) (edec:ed-random-pair)
+      (let ((zkp (compute-pkey-zkp skey pkey)))
+        (setf (gethash (third zkp) *pkey-skey*) skey)
+        (values ip
+                (uuid:make-v1-uuid)
+                zkp)
+        ))))
+    
+(defun make-node-tree (ip vlist &optional parent)
+  (multiple-value-bind (ipstr uuid pkeyzkp)
+      (gen-node-id ip)
+    (let ((node (make-node ipstr uuid pkeyzkp parent)))
+      (when vlist
+        (let* ((ipv   (dotted-string-to-integer ipstr))
+               (dists (mapcar (lambda (v)
+                                (let* ((vstr (if (consp v)
+                                                 (car v)
+                                               v))
+                                       (vv (dotted-string-to-integer vstr)))
+                                  (logxor ipv vv)))
                               vlist))
-             (bins  (make-array *bins-per-node* :initial-element nil)))
-        (mapc (lambda (dist v)
-                (push v (aref bins (mod dist *bins-per-node*))))
-              dists vlist)
-        (loop for cell across bins
-              for ix from 0
-              do
-              (when cell
-                (setf (aref bins ix) (partition (car cell) (cdr cell) node))))
-        (setf (node-bins node) (delete nil (coerce bins 'list)))
-        ))
-    node))
+               (bins  (make-array *bins-per-node* :initial-element nil)))
+          (mapc (lambda (dist v)
+                  (push v (aref bins (mod dist *bins-per-node*))))
+                dists vlist)
+          (loop for cell across bins
+                for ix from 0
+                do
+                (when cell
+                  (setf (aref bins ix) (make-node-tree (car cell) (cdr cell) node))))
+          (setf (node-bins node) (delete nil (coerce bins 'list)))
+          ))
+      node)))
 
 ;; --------------------------------------------------------------------
 ;; for visual debugging...
@@ -147,6 +169,7 @@
 ;; Initial Tree Generation and Persistence
 
 (defvar *default-data-file* "cosi-nodes.txt")
+(defvar *default-key-file*  "cosi-keying.txt")
 
 (defun generate-ip ()
   ;; generate a unique random IPv4 address
@@ -156,7 +179,9 @@
       (setf (gethash ip *ip-node*) ip))))
 
 (defmethod pair-ip-uuid ((node node))
-  (cons (node-ip node) (node-uuid node)))
+  (list (node-ip node)
+        (node-uuid node)
+        (node-pkeyzkp node)))
 
 (defmethod pair-ip-uuid ((ip string))
   (pair-ip-uuid (gethash ip *ip-node*)))
@@ -172,6 +197,8 @@
     ;; pre-populate hash table with real-nodes
     (clrhash *ip-node*)
     (clrhash *uuid-node*)
+    (clrhash *pkey-node*)
+    (clrhash *pkey-skey*)
     (dolist (ip real-nodes)
       (setf (gethash ip *ip-node*) ip))
 
@@ -181,7 +208,7 @@
            (grps        (loop repeat nreal collect
                               (loop repeat nel/grp collect
                                     (generate-ip))))
-           (trees       (mapcar 'partition real-nodes grps))
+           (trees       (mapcar 'make-node-tree real-nodes grps))
            (main-tree   (find leader trees :test 'string= :key 'node-ip)))
 
       ;; mark the real nodes as special
@@ -194,11 +221,11 @@
         (setf (node-parent tree) main-tree)
         (push tree (node-bins main-tree)))
 
-      ;; save as a text file for later
+      ;; save nodes as a text file for later
       (with-open-file (f (merge-pathnames
                           #+:LISPWORKS
                           (sys:get-folder-path :documents)
-                          #+:OPENMCL
+                          #+(OR :ALLEGRO :OPENMCL)
                           "~/Documents/"
                           (or fname *default-data-file*))
                          :direction :output
@@ -213,6 +240,24 @@
                                              (mapcar 'pair-ip-uuid grp))
                                            grps))
                     f))))
+      
+      ;; write the pkey/skey associations
+      (with-open-file (f (merge-pathnames
+                          #+:LISPWORKS
+                          (sys:get-folder-path :documents)
+                          #+(OR :ALLEGRO :OPENMCL)
+                          "~/Documents/"
+                          *default-key-file*)
+                         :direction :output
+                         :if-does-not-exist :create
+                         :if-exists :rename)
+        (let ((keys nil))
+          (maphash (lambda (k v)
+                     (push (cons k v) keys))
+                   *pkey-skey*)
+          (with-standard-io-syntax
+            (pprint keys f))))
+      
       #+:LISPWORKS (view-tree main-tree)
       main-tree)))
 
@@ -220,13 +265,26 @@
 ;; Tree reconstruction
 
 (defun reconstruct-tree (&key fname)
-  (let* ((data        (read-from-string
-                       (#+:OPENMCL uiop/stream::read-file-string
-                        #+:LISPWORKS file-string
+  ;; read the keying file
+  (let* ((keys        (read-from-string
+                       (#+:OPENMCL   uiop/stream::read-file-string
+                        #+:LISPWORKS hcl:file-string
+                        #+:ALLEGRO   (need-to-specify)
                         (merge-pathnames
                          #+:LISPWORKS
                          (sys:get-folder-path :documents)
-                         #+:OPENMCL
+                         #+(OR :ALLEGRO :OPENMCL)
+                         "~/Documents/"
+                         *default-key-file*))))
+
+         (data        (read-from-string
+                       (#+:OPENMCL   uiop/stream::read-file-string
+                        #+:LISPWORKS hcl:file-string
+                        #+:ALLEGRO   (need-to-specify)
+                        (merge-pathnames
+                         #+:LISPWORKS
+                         (sys:get-folder-path :documents)
+                         #+(OR :ALLEGRO :OPENMCL)
                          "~/Documents/"
                          (or fname *default-data-file*)))))
          (leader      (getf data :leader))
@@ -244,11 +302,19 @@
                    (setf (gethash ipstr *ip-node*) ip)))))
       (clrhash *ip-node*)
       (clrhash *uuid-node*)
+      (clrhash *pkey-node*)
       (no-dups real-nodes)
       (mapc #'no-dups grps))
-
+    
+    ;; reconstruct keying info
+    (clrhash *pkey-skey*)
+    (mapc (lambda (pair)
+            (destructuring-bind (k . v) pair
+              (setf (gethash k *pkey-skey*) v)))
+          keys)
+    
     ;; reconstruct the trees
-    (let* ((trees       (mapcar 'partition real-nodes grps))
+    (let* ((trees       (mapcar 'make-node-tree real-nodes grps))
            (main-tree   (find leader trees
                               :test 'string=
                               :key  'node-ip)))
