@@ -883,9 +883,42 @@
 #+:LISPWORKS
 (editor:setup-indent "with-futures" 2)
 
+(defmacro self-par (&rest clauses)
+  ;; SELF-PAR - perform clauses in quasi-parallel
+  ;; This is intended for use within an =BIND clause
+  ;;  (example below in WITH-FUTURES)
+  ;;
+  ;; The difference between PAR and SELF-PAR is that if clauses may
+  ;; refer to Actor local state then it is generally unsound to
+  ;; perform those state accesses (especially mutation!) in any but
+  ;; the running Actor body. SELF-PAR ensures that each clause is
+  ;; performed only in the Actor body context.
+  ;;
+  `(pmapcar (=cont (=lambda (fn)
+                     (=values (funcall fn))))
+            (list ,@(mapcar #`(lambda () ,a1) clauses))))
+
+(defmacro with-self-futures (args forms &body body)
+  (let ((g!list (gensym)))
+    `(=bind (,g!list)
+         (self-par ,@forms)
+       (multiple-value-bind ,args (values-list ,g!list)
+         ,@body))))
+
+#+:LISPWORKS
+(editor:setup-indent "with-self-futures" 2)
+
 #|
 ;; examples...
   
+(spawn (lambda ()
+         (=bind (lst)
+             (self-par
+              (sin 1)
+              (sin 2)
+              (sin 3))
+           (pr (reduce '+ lst)))))
+
 (=bind (lst)
     (par
       (sin 1)

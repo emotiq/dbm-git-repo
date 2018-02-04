@@ -124,6 +124,8 @@
    #:par
    #:with-futures
    #:pmapcar
+   #:self-par
+   #:with-self-futures
    
    #:with-borrowed-mailbox
    #:do-nothing
