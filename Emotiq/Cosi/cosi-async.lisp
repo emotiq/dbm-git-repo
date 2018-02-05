@@ -39,11 +39,13 @@
    :become
    :do-nothing
    :make-actor
+   :set-executive-pool
    :with-borrowed-mailbox)
   (:export
    :schnorr-signature
    :verify-schnorr-signature
    :compute-pkey-zkp
+   :check-pkey
    ))
 
 ;; -------------------------------------------------------
@@ -227,8 +229,8 @@
 ;; default-timeout-period needs to be made smarter, based on node height in tree
 (defvar *default-timeout-period*   ;; good for 1000 nodes on single machine
   #+:LISPWORKS   40
-  #+:ALLEGRO    400
-  #+:CLOZURE    200)
+  #+:ALLEGRO     40
+  #+:CLOZURE     40)
 
 ;; internal state of each node
 (defstruct (node-state
@@ -359,6 +361,13 @@
 
 (defparameter *cosi-pkeys* (maps:empty)) ;; previously verified public keys
 
+(defun check-pkey (zkp)
+  (destructuring-bind (r c pcmpr) zkp
+    (let* ((pt   (ed-decompress-pt pcmpr)) ;; node's public key
+           (vpt  (ed-add (ed-nth-pt r)    ;; validate with NIZKP 
+                         (ed-mul pt c))))
+      (assert (= c (hash-pt-pt vpt pt))))))
+    
 (defun do-validate-public-keys (reply-to)
   ;; Each verifier node maintains a cache of previously verified
   ;; public keys in *COSI-PKEYS*. If we have already seen the pkey in
@@ -378,11 +387,9 @@
                  (progn
                    (send (pop nodes) :public-key self)
                    (recv
-                     ((list :pkey node-id (list r c pcmpr))
-                      (let* ((pt   (ed-decompress-pt pcmpr)) ;; node's public key
-                             (vpt  (ed-add (ed-nth-pt r)    ;; validate with NIZKP 
-                                           (ed-mul pt c))))
-                        (assert (= c (hash-pt-pt vpt pt)))
+                     ((list :pkey node-id zkp)
+                      (check-pkey zkp)
+                      (let ((pt  (ed-decompress-pt (third zkp)))) ;; node's public key
                         (setf *cosi-pkeys* (maps:add node-id pt *cosi-pkeys*))
                         (next)))
 
@@ -723,10 +730,6 @@
 
 (defvar *x* nil) ;; saved result for inspection
 
-(defun set-cores (n)
-  (setf ac:*nbr-execs* n)
-  (ac::kill-executives))
-
 (defun do-wall-time (fn)
   (let ((start (get-universal-time)))
     (funcall fn)
@@ -744,7 +747,7 @@
   form)
 
 (defun tst (&optional (n 100))
-  (set-cores 4)
+  (set-executive-pool 4)
   (organic-build-tree n)
     
     #+:LISPWORKS
@@ -760,7 +763,7 @@
                (send *top-node* :cosi mbox msg)
                (xtime (setf *x* (mpcompat:mailbox-read mbox)))))
         (print "------------------------------------------------")
-        (set-cores 1)
+        (set-executive-pool 1)
         (print "1 Executive")
         (loop repeat 3 do
               (format t "~%Create ~a node multi-signature" n)

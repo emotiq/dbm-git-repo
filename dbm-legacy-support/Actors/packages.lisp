@@ -127,7 +127,8 @@
    #:pfirst
    #:par-first
    #:with-first-future
-   
+
+   #:set-executive-pool
    #:with-borrowed-mailbox
    #:do-nothing
    ))

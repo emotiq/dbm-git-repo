@@ -627,6 +627,11 @@
 	       )))
 |#
 
+(defun set-executive-pool (npool)
+  (check-type npool (integer 1))
+  (setf *nbr-execs* npool)
+  (kill-executives))
+     
 (defmonitor
     ;; All under a global lock - called infrequently
     ((terminate-actor (actor)
@@ -967,3 +972,26 @@
 #+:LISPWORKS
 (editor:setup-indent "with-first-future" 2)
 
+#|
+;; example
+(with-first-future (which)
+    ;; setup a race...
+    ((progn
+       (sleep 1)
+       :one)
+     (progn
+       (sleep 1)
+       :two)
+     (progn
+       (sleep 1)
+       :three))
+  (pr which))
+
+(=bind (which)
+    ;; same race, different syntax...
+    (pfirst (=lambda (id)
+              (sleep 1)
+              (=values id))
+            '(:one :two :three))
+  (pr which))
+|#
