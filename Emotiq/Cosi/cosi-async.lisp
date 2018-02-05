@@ -230,7 +230,7 @@
 (defparameter *default-timeout-period*   ;; good for 1600 nodes on single machine
   #+:LISPWORKS   4
   #+:ALLEGRO     18
-  #+:CLOZURE     10)
+  #+:CLOZURE     16)
 
 ;; internal state of each node
 (defstruct (node-state
