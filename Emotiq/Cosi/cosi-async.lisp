@@ -229,8 +229,8 @@
 ;; default-timeout-period needs to be made smarter, based on node height in tree
 (defparameter *default-timeout-period*   ;; good for 1600 nodes on single machine
   #+:LISPWORKS   4
-  #+:ALLEGRO     18
-  #+:CLOZURE     16)
+  #+:ALLEGRO     20
+  #+:CLOZURE     20)
 
 ;; internal state of each node
 (defstruct (node-state
@@ -357,7 +357,23 @@
                          (ed-mul pt c))))
       (assert (= c (hash-pt-pt vpt pt)))
       pt)))
-    
+
+(=defun check-node-pkey (node)
+   (let ((self (current-actor)))
+     (send node :public-key self)
+     (recv
+      ((list :pkey node-id zkp)
+       (let ((pt (check-pkey zkp)))
+	 (loop for old = *cosi-pkeys*
+	     until (mpcompat:CAS *cosi-pkeys* old (maps:add node-id pt old)))
+	 (=values node-id)))
+      
+      (msg
+       (error "Unknown message: ~A" msg))
+      
+      :TIMEOUT *default-timeout-period*
+      )))
+
 (defun do-validate-public-keys (reply-to)
   ;; Each verifier node maintains a cache of previously verified
   ;; public keys in *COSI-PKEYS*. If we have already seen the pkey in
@@ -369,6 +385,13 @@
                               (acc v))
                             *cosi-nodes*)))
         (self  (current-actor)))
+    (=bind (lst)
+	   (pmapcar '=check-node-pkey nodes)
+       (assert (every (lambda (node)
+			(maps:find (node-state-id node) *cosi-pkeys*))
+		      nodes))
+       (send reply-to lst))
+    #|
     (labels ((next ()
                (if (endp nodes)
                    (progn
@@ -381,11 +404,15 @@
                       (let ((pt (check-pkey zkp))) ;; public key ECC pt
                         (setf *cosi-pkeys* (maps:add node-id pt *cosi-pkeys*))
                         (next)))
-
+		     #|
                      :TIMEOUT *default-timeout-period*
-                     :ON-TIMEOUT (next))
+                     :ON-TIMEOUT (next)
+		     |#
+		     )
                    ))))
-      (next))))
+      (next))
+    |#
+    ))
 
 (defun validate-public-keys ()
   (with-borrowed-mailbox (mbox)
