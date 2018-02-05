@@ -227,10 +227,10 @@
 (defvar *subs-per-node*           9) ;; each node is part of an N+1-way group
 
 ;; default-timeout-period needs to be made smarter, based on node height in tree
-(defvar *default-timeout-period*   ;; good for 1000 nodes on single machine
-  #+:LISPWORKS   40
-  #+:ALLEGRO     40
-  #+:CLOZURE     40)
+(defparameter *default-timeout-period*   ;; good for 1600 nodes on single machine
+  #+:LISPWORKS   4
+  #+:ALLEGRO     18
+  #+:CLOZURE     4)
 
 ;; internal state of each node
 (defstruct (node-state
@@ -243,7 +243,8 @@
   seq        ;; the ID of the current Cosi round
   subs       ;; list of my network subordinates
   parts      ;; list of participant nodes this round
-  timeout    ;; current timeout period used by node
+  height     ;; tree height this node, 0 = leaf, no subs
+  load       ;; total subs below self, plus 1
   byz        ;; indicator for Byzantine behavior
   ;; -------------
   (levels  0) ;; used by top node for node insertion
@@ -255,7 +256,6 @@
     (%make-node-state
      :pkey    pkey
      :skey    skey
-     :timeout *default-timeout-period*
      :byz     byz)))
 
 (defmacro with-node-state (state &body body)
@@ -269,12 +269,13 @@
                     (state-parts      node-state-parts)
                     (state-levels     node-state-levels)
                     (state-session    node-state-session)
-                    (state-timeout    node-state-timeout)
+		    (state-height     node-state-height)
+                    (state-load       node-state-load)
                     (state-byz        node-state-byz)
                     (state-self       node-state-self)) ,state
      (declare (ignorable state-id   state-pkey  state-skey state-zkp
                          state-v    state-seq
-                         state-timeout
+                         state-height state-load
                          state-subs state-parts state-levels  state-session
                          state-byz  state-self))
      ,@body))
@@ -282,46 +283,32 @@
 #+:LISPWORKS
 (editor:setup-indent "with-node-state" 1)
 
-;; -------------------------------------------------------------
-;; Stand-in for Cosi network comms...
-;;
-;; Nodes have a GENSYM ID, and a DLAMBDA handler closure
-;; Each node stores its own private local state
+;; -----------------------------------------------------------
 
-(defstruct cosi-node
-  fn
-  id)
+(defvar *cosi-nodes* (maps:empty)) ;; a hashtable linking node ID with simulator closure
 
 ;; -----------------------------------------------------------
 
-(defparameter *cosi-nodes* (maps:empty)) ;; a hashtable linking node ID with simulator closure
-
-(defun node-fn (id)
-  (cosi-node-fn (maps:find id *cosi-nodes*)))
-
-;; -----------------------------------------------------------
-
-(defmethod ask ((node cosi-node) &rest msg)
-  (apply 'ac:ask (cosi-node-fn node) msg))
-
-(defmethod ask ((node symbol) &rest msg)
-  (apply 'ask (maps:find node *cosi-nodes*) msg))
+(defmethod ask ((node node-state) &rest msg)
+  (apply 'ac:ask (node-state-self node) msg))
 
 ;; -----------------------------------------------------------
 
 (defmethod send (dest &rest msg)
   (apply 'ac:send dest msg))
 
-(defmethod send ((dest symbol) &rest msg)
-  (apply 'send (node-fn dest) msg))
+(defmethod send ((dest node-state) &rest msg)
+  (apply 'ac:send (node-state-self dest) msg))
+
+;; -----------------------------------------------------------
 
 (defun self-call (&rest msg)
   (apply 'ac:self-call msg))
 
 ;; -----------------------------------------------------------
 
-(defmethod reply ((id symbol) &rest ans)
-  (apply 'reply (node-fn id) ans))
+(defmethod reply ((node node-state) &rest ans)
+  (apply 'ac:send (node-state-self node) ans))
 
 (defmethod reply ((id null) &rest ans)
   ans)
@@ -337,6 +324,7 @@
     (or msg t)))
 
 (defun compute-pkey-zkp (skey pkey)
+  ;; from private skey and public ECC pt pkey, compute the pkey ZKP
   (multiple-value-bind (v vpt) (ed-random-pair)
     (let* ((c     (hash-pt-pt vpt pkey)) ;; Fiat-Shamir NIZKP challenge
            (r     (sub-mod *ed-r* v
@@ -359,14 +347,16 @@
 
 ;; ----------------------------------------------------------------------
 
-(defparameter *cosi-pkeys* (maps:empty)) ;; previously verified public keys
+(defvar *cosi-pkeys* (maps:empty)) ;; previously verified public keys
 
 (defun check-pkey (zkp)
+  ;; verify pkey zkp, return decompressed pkey ECC point
   (destructuring-bind (r c pcmpr) zkp
     (let* ((pt   (ed-decompress-pt pcmpr)) ;; node's public key
            (vpt  (ed-add (ed-nth-pt r)    ;; validate with NIZKP 
                          (ed-mul pt c))))
-      (assert (= c (hash-pt-pt vpt pt))))))
+      (assert (= c (hash-pt-pt vpt pt)))
+      pt)))
     
 (defun do-validate-public-keys (reply-to)
   ;; Each verifier node maintains a cache of previously verified
@@ -375,8 +365,8 @@
   ;; cached value.
   (let ((nodes (um:accum acc
                  (maps:iter (lambda (k v)
-                              (declare (ignore v))
-                              (acc k))
+                              (declare (ignore k))
+                              (acc v))
                             *cosi-nodes*)))
         (self  (current-actor)))
     (labels ((next ()
@@ -388,8 +378,7 @@
                    (send (pop nodes) :public-key self)
                    (recv
                      ((list :pkey node-id zkp)
-                      (check-pkey zkp)
-                      (let ((pt  (ed-decompress-pt (third zkp)))) ;; node's public key
+                      (let ((pt (check-pkey zkp))) ;; public key ECC pt
                         (setf *cosi-pkeys* (maps:add node-id pt *cosi-pkeys*))
                         (next)))
 
@@ -420,7 +409,8 @@
         ((list* :commit ans)
          (=values ans))
         
-        :TIMEOUT timeout
+        :TIMEOUT (* timeout
+		    *default-timeout-period*)
         :ON-TIMEOUT (progn
                       (become 'do-nothing)
                       (=values nil))
@@ -441,9 +431,9 @@
       (node-reset state seq-id) ;; starting new round of Cosi
       (multiple-value-bind (v vpt) (ed-random-pair)
         (setf state-v v) ;; hold secret random seed
-        (let ((tparts (list state-id)))
+        (let ((tparts (list state)))
           (=bind (lst)
-              (pmapcar (sub-commitment seq-id msg state-timeout) state-subs)
+              (pmapcar (sub-commitment seq-id msg state-load) state-subs)
             (labels ((fold-answer (ans node)
                        (cond ((null ans)
                               (mark-node-no-response state node))
@@ -470,7 +460,8 @@
                    :invalid-commitment))
          (=values nil))
         
-        :TIMEOUT timeout
+        :TIMEOUT (* timeout
+		    *default-timeout-period*)
         :ON-TIMEOUT (progn
                       (become 'do-nothing)
                       (=values nil))
@@ -490,7 +481,7 @@
       (let ((r  (sub-mod *ed-r* state-v (mult-mod *ed-r* c state-skey)))
             (missing nil))
         (=bind (lst)
-            (pmapcar (sub-signing seq-id c state-timeout) state-parts)
+            (pmapcar (sub-signing seq-id c state-load) state-parts)
           (labels ((fold-answer (ans node)
                      (cond ((null ans)
                             (mark-node-no-response state node)
@@ -521,9 +512,10 @@
              ((list :signed r)
               (reply reply-to :signature msg (list c    ;; cosi signature
                                                    r
-                                                   tparts)))
+                                                   (mapcar 'node-state-id tparts))))
              ((list :missing-node)
               ;; retry from start
+              (print "Signing restart")
               (node-compute-cosi state reply-to msg))
 
              ((list :invalid-commitment)
@@ -562,7 +554,7 @@
                           (if (endp nodes)
                               (fail)
                             (progn
-                              (send (car nodes) :try-insert-node state-id node (1- level))
+                              (send (car nodes) :try-insert-node state node (1- level))
                               (recv
 
                                 ((list :node-inserted)
@@ -571,7 +563,7 @@
                                 ((list :node-not-inserted)
                                  (try (cdr nodes)))
 
-                                :TIMEOUT state-timeout
+                                :TIMEOUT (* level *default-timeout-period*)
                                 :ON-TIMEOUT
                                 (progn
                                   (mark-node-no-response state (car nodes))
@@ -587,7 +579,7 @@
   ;; this should only be performed on by the top node
   (with-node-state state
     (labels ((ins ()
-               (self-call :try-insert-node state-id node state-levels)
+               (self-call :try-insert-node state node state-levels)
                (recv
                  ((list :node-inserted)
                   (reply reply-to :node-inserted))
@@ -626,78 +618,93 @@
     (node-return-pkey+zkp state nil) ;; done for pre-caching side effect
     (with-node-state state
       (setf state-self
-            (make-cosi-node
-             :id state-id
-             :fn (make-actor (um:dlambda
-                   ;; -------------------------------------------
-                   ;; Cosi entry points
-                   
-                   (:public-key (reply-to)
-                    ;; inform the caller of my public key
-                    (node-return-pkey+zkp state reply-to))
-                   
-                   (:commitment (reply-to seq-id msg)
-                    ;; start of new Cosi signature computation
-                    (node-make-cosi-commitment state reply-to seq-id msg))
-                   
-                   (:signing (reply-to seq-id c)
-                    ;; finish of new Cosi signature computation
-                    (node-compute-signature state reply-to seq-id c))
-                   
-                   (:cosi (reply-to msg)
-                    ;; compute a grand Cosi signature
-                    (node-compute-cosi state reply-to msg))
-
-                   (:try-insert-node (reply-to node level)
-                    ;; try to insert a node somewhere in this subtree
-                    (node-try-insert-node state reply-to node level))
-
-                   (:insert-node (reply-to node)
-                    ;; must insert a node in the tree somewhere
-                    ;; should only be sent to the master node
-                    (node-must-insert-node state reply-to node))
-                   
-                   ;; -----------------------------------------
-                   ;; Verifier entry points
-                   
-                   (:validate (msg sig)
-                    ;; validate a Cosi signature against a message
-                    (node-validate-cosi state msg sig))
-                   
-                   ;; -----------------------------------------
-                   ;; for simulation tree construction...
-                   
-                   (:count-nodes ()
-                    ;; for manual verification
-                    (1+ (loop for node in state-subs sum
-                              (ask node :count-nodes))))
-                   
-                   (:tree-subs ()
-                    ;; for tree visualization
-                    state-subs)
-
-                   (t (&rest msg)
-                      (error "unknown message: ~A" msg))
-                   )))
+            (make-actor
+             (um:dlambda
+               ;; -------------------------------------------
+               ;; Cosi entry points
+               
+               (:public-key (reply-to)
+                ;; inform the caller of my public key
+                (node-return-pkey+zkp state reply-to))
+               
+               (:commitment (reply-to seq-id msg)
+                ;; start of new Cosi signature computation
+                (node-make-cosi-commitment state reply-to seq-id msg))
+               
+               (:signing (reply-to seq-id c)
+                ;; finish of new Cosi signature computation
+                (node-compute-signature state reply-to seq-id c))
+               
+               (:cosi (reply-to msg)
+                ;; compute a grand Cosi signature
+                (node-compute-cosi state reply-to msg))
+               
+               (:try-insert-node (reply-to node level)
+                ;; try to insert a node somewhere in this subtree
+                (node-try-insert-node state reply-to node level))
+               
+               (:insert-node (reply-to node)
+                ;; must insert a node in the tree somewhere
+                ;; should only be sent to the master node
+                (node-must-insert-node state reply-to node))
+               
+               ;; -----------------------------------------
+               ;; Verifier entry points
+               
+               (:validate (msg sig)
+                ;; validate a Cosi signature against a message
+                (node-validate-cosi state msg sig))
+               
+               ;; -----------------------------------------
+               ;; for simulation tree construction...
+               
+               (t (&rest msg)
+                  (error "unknown message: ~A" msg))
+               ))
             ;; register ourself with the ASK cross reference table
-            *cosi-nodes* (maps:add state-id state-self *cosi-nodes*))
-      state-self)))
+            *cosi-nodes* (maps:add state-id state *cosi-nodes*))
+      state)))
 
 #||#
 ;; ----------------------------------------------------------------------------
 ;; Test Code
 
+(defun count-nodes (node)
+  ;; for manual verification
+  (with-node-state node
+    (1+ (loop for sub in state-subs sum
+              (count-nodes sub)))))
+
+(defun compute-node-load (node)
+  (with-node-state node
+    (or state-load
+        (setf state-load
+              (1+ (reduce '+ (mapcar 'compute-node-load state-subs))))
+        )))
+
+(defun compute-node-height (node)
+  (with-node-state node
+    (or state-height
+	(setf state-height
+	  (or (and state-subs
+		   (1+ (reduce 'max (mapcar 'compute-node-height state-subs))))
+	      0)
+	  ))))
+      
 (defun organic-build-tree (&optional (n 1000))
   (setf *cosi-nodes* (maps:empty))
   (setf *cosi-pkeys* (maps:empty))
   (print "Bulding witness nodes")
+  
   (let ((all (loop repeat n collect (make-node))))
-    (setf *top-node* (cosi-node-id (car all)))
+    (setf *top-node* (car all))
     (print "Constructing node tree")
     (with-borrowed-mailbox (mbox)
       (dolist (node (cdr all))
-        (send *top-node* :insert-node mbox (cosi-node-id node))
+        (send *top-node* :insert-node mbox node)
         (mpcompat:mailbox-read mbox)))
+    (format t "~%Tree Height: ~A levels" (compute-node-height *top-node*))
+    (format t "~%Tree Load: ~A nodes" (compute-node-load *top-node*))
     (print "Validating public keys")
     (validate-public-keys)))
 
@@ -706,16 +713,16 @@
 
 #+:LISPWORKS
 (progn
-  (defmethod children ((node symbol) layout)
-    (reverse (ask node :tree-subs)))
+  (defmethod children ((node node-state) layout)
+    (reverse (node-state-subs node)))
 
   (defmethod print-node (x keyfn)
     nil)
 
-  (defmethod print-node ((node symbol) keyfn)
+  (defmethod print-node ((node node-state) keyfn)
     (format nil "~A" (funcall keyfn node)))
-  
-  (defmethod view-tree ((tree symbol) &key (key #'identity) (layout :left-right))
+
+  (defmethod view-tree ((tree node-state) &key (key #'node-state-id) (layout :left-right))
     (capi:contain
      (make-instance 'capi:graph-pane
                     :layout-function layout
@@ -729,6 +736,7 @@
 ;; --------------------------------------------------------------------
 
 (defvar *x* nil) ;; saved result for inspection
+(defvar *nbr-nodes* nil)
 
 (defun do-wall-time (fn)
   (let ((start (get-universal-time)))
@@ -746,38 +754,56 @@
 (defmacro xtime (form)
   form)
 
-(defun tst (&optional (n 100))
+(defun tst-build (n)
   (set-executive-pool 4)
   (organic-build-tree n)
-    
-    #+:LISPWORKS
-    (view-tree *top-node*)
+  (setf *nbr-nodes* n)
+  #+:LISPWORKS
+  (view-tree *top-node*))
+  
+(defun tst (&optional (n 100))
+  (tst-build n)
+  (tst-sig))
 
-    (print "------------------------------------------------")
-    (let ((msg "this is a test"))
-      (with-borrowed-mailbox (mbox)
-        (print "4 Executives")
-        (loop repeat 3 do
-              (format t "~%Create ~a node multi-signature" n)
-              (wall-time
-               (send *top-node* :cosi mbox msg)
-               (xtime (setf *x* (mpcompat:mailbox-read mbox)))))
-        (print "------------------------------------------------")
-        (set-executive-pool 1)
-        (print "1 Executive")
-        (loop repeat 3 do
-              (format t "~%Create ~a node multi-signature" n)
-              (wall-time
-               (send *top-node* :cosi mbox msg)
-               (xtime (setf *x* (mpcompat:mailbox-read mbox)))))
-              
-        (print "------------------------------------------------")
-        (print "Verify signature")
-        (values (ask *top-node* :validate msg (third *x*)) :done)
-        ))
-    )
+(defun tst-sig ()
+  (set-executive-pool 4)
+  (print "------------------------------------------------")
+  (let ((msg "this is a test"))
+    (with-borrowed-mailbox (mbox)
+      (labels ((doit ()
+		 (loop repeat 3 do
+		       (format t "~%Create ~a node multi-signature" *nbr-nodes*)
+		       (wall-time
+			(send *top-node* :cosi mbox msg)
+			(xtime (setf *x* (mpcompat:mailbox-read mbox)))
+			(format t "~%~D actual witnesses" (length (third (third *x*))))))
+		 ))
+	(print "4 Executives")
+	(doit)
+	(print "------------------------------------------------")
+	(set-executive-pool 1)
+	(print "1 Executive")
+	(doit)
+	
+	(print "------------------------------------------------")
+	(print "Verify signature")
+	(set-executive-pool 4)
+	(values (ask *top-node* :validate msg (third *x*)) :done)
+	))))
 
-(defparameter *lock-count* 0)
+(defun tst-timer (nsec)
+  (spawn (lambda ()
+	   (let ((start (get-universal-time)))
+	     (recv
+	      ((list :stop)
+	       :ok)
+	      
+	      :TIMEOUT nsec
+	      :ON-TIMEOUT (let ((stop (get-universal-time)))
+			    (format t "~%Duration: ~Ds" (- stop start)))
+	      )))))
+
+(defvar *lock-count* 0)
 
 #+:ALLEGRO
 (excl:def-fwrapper lock-wrap (&rest args)

@@ -243,7 +243,7 @@
   ;; setup a new RECV control block in the current Actor, hence
   ;; activating RECV behavior until we find a message we want, or
   ;; else timeout waiting for one.
-  (let ((this-id (vector))) ;; make a unique object
+  (let ((this-id (gensym))) ;; make a unique object
     (setf (actor-recv-info self)
           (make-instance 'recv-info
                          :id          this-id
@@ -256,13 +256,17 @@
 ;; Timeout Timers...
 
 (defun send-timeout-message (self this-id)
+  #|
   (let ((info (actor-recv-info self)))
     (when (and info ;; still in a RECV?
                (readout-timer info this-id)) ;; still awaited?
       (send self
             :recv-timeout-{3A95A26E-D84E-11E7-9D93-985AEBDA9C2A}
+            this-id)))
+  |#
+      (send self
+            :recv-timeout-{3A95A26E-D84E-11E7-9D93-985AEBDA9C2A}
             this-id))
-    ))
 
 (defun make-timeout-timer (delta self this-id)
   (when delta
@@ -628,9 +632,11 @@
 |#
 
 (defun set-executive-pool (npool)
+  ;; set the Executive pool nbr threads, return previous value
   (check-type npool (integer 1))
-  (setf *nbr-execs* npool)
-  (kill-executives))
+  (prog1
+      (shiftf *nbr-execs* npool)
+    (kill-executives)))
      
 (defmonitor
     ;; All under a global lock - called infrequently

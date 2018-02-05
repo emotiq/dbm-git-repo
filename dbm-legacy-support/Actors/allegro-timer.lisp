@@ -18,8 +18,8 @@
 
 (in-package :allegro-timer)
 
-(defvar *timeout-queue*  (priq:make-priq))
-(defvar *cancel-queue*   (priq:make-priq))
+(defvar *timeout-queue*  (priq:make-lifo))
+(defvar *cancel-queue*   (priq:make-lifo))
 (defvar *cycle-bits*     0.0)
 (defvar *last-check*     0)
 (defvar *timeout-tree*   (maps:empty))
@@ -65,19 +65,25 @@
         while timer
         do
         (let* ((t0     (timer-t0 timer))
-               (timers (maps:find t0 *timeout-tree*)))
-          (setf *timeout-tree* (maps:add t0 (cons timer timers) *timeout-tree*))))
+               (timers (maps:find t0 *timeout-tree*))
+               (new    (cons timer (delete timer timers))))
+          (setf *timeout-tree* (maps:add t0 new *timeout-tree*))))
   ;; process cancellations
   (loop for timer = (priq:popq *cancel-queue*)
         while timer
         do
         (let* ((t0     (timer-t0 timer))
                (timers (maps:find t0 *timeout-tree*)))
-          (setf *timeout-tree* (maps:add t0 (delete timer timers) *timeout-tree*))))
+          (when timers
+            (let ((rem (delete timer timers)))
+              (setf *timeout-tree* (if rem
+                                       (maps:add t0 rem *timeout-tree*)
+                                     (maps:remove t0 *timeout-tree*)))))
+          ))
   ;; check our current time
   (let ((now (get-universal-time)))
     (if (= now *last-check*)
-        (setf now (+ now (incf *cycle-bits* 0.1)))
+        (incf now (incf *cycle-bits* 0.1))
       (setf *cycle-bits* 0.0
             *last-check* now))
     ;; fire off expired timers
@@ -89,23 +95,27 @@
                    (let ((per (timer-period timer)))
                      (when per
                        (schedule-timer-relative timer per per)))
+                   (apply (timer-fn timer) (timer-args timer))
+                   #|
                    (multiple-value-bind (ans err)
                        (ignore-errors
                          (apply (timer-fn timer) (timer-args timer)))
                      (declare (ignore ans))
                      (when err
-                       (unschedule-timer timer)))))
+                       (unschedule-timer timer)))
+                   |#
+                   ))
                *timeout-tree*)))
       
 (defun make-master-timer ()
   (mpcompat:process-run-function "Master Timer"
-                           '()
-                           (lambda ()
-                             (loop
-                              (sleep 0.1)
-                              (check-timeouts)))))
+    '()
+    (lambda ()
+      (loop
+       (sleep 0.1)
+       (check-timeouts)))))
 
-(make-master-timer)
+(defvar *master-timer* (make-master-timer))
 
 #|
 (let ((timer (make-timer (lambda () (print :Howdy!)))))
