@@ -121,9 +121,12 @@
    #:=apply
    #:with-cont
    #:with-future
+   #:pmapcar
    #:par
    #:with-futures
-   #:pmapcar
+   #:pfirst
+   #:par-first
+   #:with-first-future
    
    #:with-borrowed-mailbox
    #:do-nothing

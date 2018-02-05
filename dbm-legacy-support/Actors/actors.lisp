@@ -923,3 +923,44 @@
   (pr lst))
 => (0.84147096 0.5403023 1.5574077)
 |#
+
+;; ---------------------------------------------------------------
+
+(=defun pfirst (fn &rest lists)
+  ;;
+  ;; Parallel OR - returns the first parallel exec that returns a
+  ;; non-null value.  Use like PMAPCAR against parallel execs, each of
+  ;; which is the same function applied to different args.
+  ;;
+  ;; The function fn should be defined with =DEFUN or =LAMBDA, and
+  ;; return via =VALUES
+  ;;
+  ;; PFIRST is intended for use within an =BIND
+  ;;  (see example below)
+  ;;
+  (let* ((grps   (trn lists))
+         (ret    (list nil)))
+    (labels ((done (ans)
+               (when (and ans
+                          (mpcompat:CAS (car ret) nil t))
+                 (=values ans))))
+      (when grps
+        (loop for grp in grps
+              do
+              (apply 'spawn fn #'done grp)))
+      )))
+
+(defmacro par-first (&rest clauses)
+  `(pfirst (=lambda (fn)
+             (=values (funcall fn)))
+           (list ,@(mapcar #`(lambda () ,a1) clauses))))
+
+(defmacro with-first-future ((arg &rest forms) &body body)
+  ;; actually like a WHEN-LET on OR of parallel conditionals
+  `(=bind (,arg)
+       (par-first ,@forms)
+     ,@body))
+
+#+:LISPWORKS
+(editor:setup-indent "with-first-future" 2)
+
