@@ -229,8 +229,8 @@
 ;; default-timeout-period needs to be made smarter, based on node height in tree
 (defparameter *default-timeout-period*   ;; good for 1600 nodes on single machine
   #+:LISPWORKS   4
-  #+:ALLEGRO     20
-  #+:CLOZURE     20)
+  #+:ALLEGRO     2
+  #+:CLOZURE     4)
 
 ;; internal state of each node
 (defstruct (node-state
@@ -371,7 +371,7 @@
       (msg
        (error "Unknown message: ~A" msg))
       
-      :TIMEOUT *default-timeout-period*
+      :TIMEOUT 120
       )))
 
 (defun do-validate-public-keys (reply-to)
@@ -391,27 +391,6 @@
 			(maps:find (node-state-id node) *cosi-pkeys*))
 		      nodes))
        (send reply-to lst))
-    #|
-    (labels ((next ()
-               (if (endp nodes)
-                   (progn
-                     (become 'do-nothing) ;; for late arrivals
-                     (reply reply-to :ok))
-                 (progn
-                   (send (pop nodes) :public-key self)
-                   (recv
-                     ((list :pkey node-id zkp)
-                      (let ((pt (check-pkey zkp))) ;; public key ECC pt
-                        (setf *cosi-pkeys* (maps:add node-id pt *cosi-pkeys*))
-                        (next)))
-		     #|
-                     :TIMEOUT *default-timeout-period*
-                     :ON-TIMEOUT (next)
-		     |#
-		     )
-                   ))))
-      (next))
-    |#
     ))
 
 (defun validate-public-keys ()
@@ -1065,3 +1044,17 @@
  |#
 
 
+(defun tst-recv ()
+  ;; verify that timeout does not fire prematurely
+  ;; and that timeout is cancelled on receipt of valid message
+  (set-executive-pool 4)
+  (let ((thr (spawn (lambda ()
+		      (recv
+		       ((list :ok) t)
+		       :TIMEOUT 10
+		       :ON-TIMEOUT (progn
+				     (become 'do-nothing)
+				     (print "What?"))))
+		    )))
+    (sleep 3)
+    (send thr :ok)))

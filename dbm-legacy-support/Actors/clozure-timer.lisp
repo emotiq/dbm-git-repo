@@ -7,7 +7,7 @@
 
 (defvar *timeout-queue*  (priq:make-lifo))
 (defvar *cancel-queue*   (priq:make-lifo))
-(defvar *cycle-bits*     0.0)
+(defvar *cycle-bits*     0.0d0)
 (defvar *last-check*     0)
 (defvar *timeout-tree*   (maps:empty))
 
@@ -70,8 +70,8 @@
   ;; check our current time
   (let ((now (get-universal-time)))
     (if (= now *last-check*)
-        (incf now (incf *cycle-bits* 0.1))
-      (setf *cycle-bits* 0.0
+        (incf now (incf *cycle-bits* 0.1d0))
+      (setf *cycle-bits* 0.0d0
             *last-check* now))
     ;; fire off expired timers
     (maps:iter (lambda (t0 timer-list)
