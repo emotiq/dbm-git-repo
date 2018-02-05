@@ -865,13 +865,18 @@
         (=values nil)))
     ))
 
+(defun par-xform (pfn &rest clauses)
+  ;; Internal transform function. Converts a list of clauses to a form
+  ;; suitable for application by PMAPCAR or PFIRST
+  `(,pfn (=lambda (fn)
+          (=values (funcall fn)))
+         (list ,@(mapcar #`(lambda () ,a1) clauses))))
+
 (defmacro par (&rest clauses)
   ;; PAR - perform clauses in parallel
   ;; This is intended for use within an =BIND clause
   ;;  (example below in WITH-FUTURES)
-  `(pmapcar (=lambda (fn)
-              (=values (funcall fn)))
-            (list ,@(mapcar #`(lambda () ,a1) clauses))))
+  (apply 'par-xform 'pmapcar clauses))
 
 (defmacro with-futures (args forms &body body)
   (let ((g!list (gensym)))
@@ -951,11 +956,9 @@
       )))
 
 (defmacro par-first (&rest clauses)
-  `(pfirst (=lambda (fn)
-             (=values (funcall fn)))
-           (list ,@(mapcar #`(lambda () ,a1) clauses))))
+  (apply 'par-xform 'pfirst clauses))
 
-(defmacro with-first-future ((arg &rest forms) &body body)
+(defmacro with-first-future ((arg) forms &body body)
   ;; actually like a WHEN-LET on OR of parallel conditionals
   `(=bind (,arg)
        (par-first ,@forms)
