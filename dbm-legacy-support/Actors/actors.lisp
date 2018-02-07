@@ -258,17 +258,9 @@
 ;; Timeout Timers...
 
 (defun send-timeout-message (self this-id)
-  #|
-  (let ((info (actor-recv-info self)))
-    (when (and info ;; still in a RECV?
-               (readout-timer info this-id)) ;; still awaited?
-      (send self
-            :recv-timeout-{3A95A26E-D84E-11E7-9D93-985AEBDA9C2A}
-            this-id)))
-  |#
-      (send self
-            :recv-timeout-{3A95A26E-D84E-11E7-9D93-985AEBDA9C2A}
-            this-id))
+  (send self
+        :recv-timeout-{3A95A26E-D84E-11E7-9D93-985AEBDA9C2A}
+        this-id))
 
 (defun make-timeout-timer (delta self this-id)
   (when delta
@@ -276,13 +268,6 @@
                   'send-timeout-message self this-id)))
       (schedule-timer-relative timer delta)
       timer)))
-
-(defmethod readout-timer ((info recv-info) tid)
-  ;; destructively read out the timer
-  ;; if it matches the one for session tid
-  (when (eq tid (recv-info-id info))
-    ;; yes, this is sloppy MP, but harmless
-    (shiftf (recv-info-timer info) nil)))
 
 ;; -------------------------------------------------------------
 
@@ -292,9 +277,7 @@
          (ans-fn (funcall (recv-info-selector-fn info) msg)))
     (cond (ans-fn
            (setf (actor-recv-info self) nil) ;; revert to non-RECV behavior
-           (when-let (timer (readout-timer info
-                                           (recv-info-id info)))
-             ;; otherwise, we never had one, or else timeout just fired
+           (when-let (timer (recv-info-timer info))
              (unschedule-timer timer))
            (enqueue-replay self info) ;; prep for life after RECV
            (funcall ans-fn))          ;; handle the message
