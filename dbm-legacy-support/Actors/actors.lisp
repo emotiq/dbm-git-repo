@@ -21,8 +21,10 @@
   ;; running in that thread
   *current-actor*)
 
-(defvar *actor-ready-queue*   (make-prio-mailbox)) ;; a queue of pending Actor activations
-(defvar *executive-processes* nil)                 ;; the list of Executive threads
+(defvar *actor-ready-queue*  ;; a queue of pending Actor activations
+  (make-prio-mailbox :name "Actor Ready Queue"))
+
+(defvar *executive-processes* nil)  ;; the list of Executive threads
 
 (defun do-nothing (&rest args)
   (declare (ignore args))
@@ -591,7 +593,8 @@
 (defun executive-loop ()
   ;; the main executive loop
   (unwind-protect
-      (loop for fn = (mailbox-read *actor-ready-queue*) ;; (pop-ready-queue)
+      (loop for fn = (mailbox-read *actor-ready-queue*
+                                   "Waiting for Actor")
             do
             (setf *last-heartbeat* (get-universal-time))
             (restart-case

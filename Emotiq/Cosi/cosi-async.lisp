@@ -46,6 +46,8 @@
    :verify-schnorr-signature
    :compute-pkey-zkp
    :check-pkey
+   :hash-pt-pt
+   :hash-pt-msg
    ))
 
 ;; -------------------------------------------------------
@@ -346,6 +348,57 @@
            )))
 
 ;; ----------------------------------------------------------------------
+;; delay instrumentation
+
+#|
+(defvar *dly-arr*  (make-array 40 :initial-element 1))
+
+(defvar *dly-instr*
+  (ac:make-actor
+   (let* ((nel  40)
+          (data make-array nel :initial-value 1))
+     (um:dlambda
+       (:incr (dly)
+        #+:LISPWORKS
+        (incf (aref data (min (1- nel) dly))))
+       (:clr ()
+        (fill data 1))
+       (:plt ()
+        #+:LISPWORKS
+        (plt:plot 'histo *dly-arr*
+                  :clear  t
+                  :ylog   t
+                  :line-type :stepped
+                  :thick  2
+                  :title  "Measured Delay Times"
+                  :xtitle "Delay [sec]"
+                  :ytitle "Counts"))
+       ))))
+|#
+
+(defvar *dly-instr*
+  (ac:make-actor
+   (let ((data nil))
+     (um:dlambda
+       (:incr (dly)
+        #+:LISPWORKS
+        (push dly data))
+       (:clr ()
+        (setf dly nil))
+       (:plt ()
+        #+:LISPWORKS
+        (plt:histogram 'histo data
+                       :clear  t
+                       :ylog   t
+                       :thick  2
+                       ;; :cum    t
+                       :norm   nil
+                       :title  "Measured Delay Ratios"
+                       :xtitle "Delay-Ratio"
+                       :ytitle "Counts"))
+       ))))
+
+;; ----------------------------------------------------------------------
 
 (defvar *cosi-pkeys* (maps:empty)) ;; previously verified public keys
 
@@ -355,18 +408,20 @@
     (let* ((pt   (ed-decompress-pt pcmpr)) ;; node's public key
            (vpt  (ed-add (ed-nth-pt r)    ;; validate with NIZKP 
                          (ed-mul pt c))))
-      (assert (= c (hash-pt-pt vpt pt)))
-      pt)))
+      (values pt
+              (= c (hash-pt-pt vpt pt)))
+      )))
 
 (=defun check-node-pkey (node)
    (let ((self (current-actor)))
      (send node :public-key self)
      (recv
       ((list :pkey node-id zkp)
-       (let ((pt (check-pkey zkp)))
-	 (loop for old = *cosi-pkeys*
-	     until (mpcompat:CAS *cosi-pkeys* old (maps:add node-id pt old)))
-	 (=values node-id)))
+       (multiple-value-bind (pt ok) (check-pkey zkp)
+         (when ok
+           (loop for old = *cosi-pkeys*
+                 until (mpcompat:CAS *cosi-pkeys* old (maps:add node-id pt old)))
+           (=values node-id))))
       
       (msg
        (error "Unknown message: ~A" msg))
@@ -383,8 +438,7 @@
                  (maps:iter (lambda (k v)
                               (declare (ignore k))
                               (acc v))
-                            *cosi-nodes*)))
-        (self  (current-actor)))
+                            *cosi-nodes*))))
     (=bind (lst)
 	   (pmapcar '=check-node-pkey nodes)
        (assert (every (lambda (node)
@@ -409,18 +463,26 @@
 
 (defun sub-commitment (seq-id msg timeout)
   (=lambda (node)
-    (let ((self (current-actor)))
-      (send node :commitment self seq-id msg)
-      (recv
-        ((list* :commit ans)
-         (=values ans))
-        
-        :TIMEOUT (* timeout
-		    *default-timeout-period*)
-        :ON-TIMEOUT (progn
-                      (become 'do-nothing)
-                      (=values nil))
-        ))))
+    (let ((self (current-actor))
+          (start (get-universal-time)))
+      (labels ((!dly ()
+                 #+:LISPWORKS
+                 (send *dly-instr* :incr
+                       (/ (- (get-universal-time) start)
+                          timeout *default-timeout-period*))))
+        (send node :commitment self seq-id msg)
+        (recv
+          ((list* :commit ans)
+           (!dly)
+           (=values ans))
+          
+          :TIMEOUT (* timeout
+                      *default-timeout-period*)
+          :ON-TIMEOUT (progn
+                        (become 'do-nothing)
+                        (!dly)
+                        (=values nil))
+          )))))
     
 (defun node-make-cosi-commitment (state reply-to seq-id msg)
   ;;
@@ -457,21 +519,31 @@
 
 (defun sub-signing (seq-id c timeout)
   (=lambda (node)
-    (let ((self (current-actor)))
-      (send node :signing self seq-id c)
-      (recv
-        ((list :signed ans)
-         (=values ans))
-        ((list (or :missing-node
-                   :invalid-commitment))
-         (=values nil))
-        
-        :TIMEOUT (* timeout
-		    *default-timeout-period*)
-        :ON-TIMEOUT (progn
-                      (become 'do-nothing)
-                      (=values nil))
-        ))))
+    (let ((self (current-actor))
+          (start (get-universal-time)))
+      (labels ((!dly ()
+                 #+:LISPWORKS
+                 (send *dly-instr* :incr
+                       (/ (- (get-universal-time) start)
+                          timeout *default-timeout-period*))))
+        (send node :signing self seq-id c)
+        (recv
+          ((list :signed ans)
+           (!dly)
+           (=values ans))
+          
+          ((list (or :missing-node
+                     :invalid-commitment))
+           (!dly)
+           (=values nil))
+          
+          :TIMEOUT (* timeout
+                      *default-timeout-period*)
+          :ON-TIMEOUT (progn
+                        (become 'do-nothing)
+                        (!dly)
+                        (=values nil))
+          )))))
     
 (defun node-compute-signature (state reply-to seq-id c)
   ;;
@@ -784,9 +856,12 @@
 			(xtime (setf *x* (mpcompat:mailbox-read mbox)))
 			(format t "~%~D actual witnesses" (length (third (third *x*))))))
 		 ))
+        (send *dly-instr* :clr)
 	(print "4 Executives")
 	(doit)
 	(print "------------------------------------------------")
+        (send *dly-instr* :plt)
+        (sleep 5)
 	(set-executive-pool 1)
 	(print "1 Executive")
 	(doit)
@@ -1058,3 +1133,72 @@
 		    )))
     (sleep 3)
     (send thr :ok)))
+
+;; ------------------------------------------------------------
+;; Message HMAC's -- assuming all participants know the public keys of
+;; everyone else, based on a UUID lookup, the HMAC is a ZKP for the
+;; message hash.
+;;
+;; A message is transformed to a 4-tuple list:
+;;
+;;   (msg r c uuid)
+;;
+;; where uuid is the UUID of the sender. Value c is the hash of the
+;; message together with a randomly chosen ECC curve point
+;;
+;;   (random seed v, random point V = v*G)
+;;
+;;   c = Hash(V | msg)
+;;
+;; Value r could only be produced by the holder of the secret key:
+;;
+;;    r = (v - s*c) mod q
+;;
+;; for ECC field of prime order q. Edwards SaveCurves all have prime
+;; order ECC fields.
+;;
+;; With UUID, lookup the PKey, an ECC curve point P, compute the
+;; rondom ECC point using:
+;;
+;;   V = r*G + c*P
+;;
+;; Then compute the hash for yourself and see that it matches the c
+;; value.
+;;
+
+(defvar *uuid-pkey*  (make-hash-table))
+
+(defun make-hmac (msg skey uuid)
+  (multiple-value-bind (v vpt) (ed-random-pair)
+    (let* ((c   (hash-pt-msg vpt msg))
+           (r   (sub-mod *ed-r* v
+                         (mult-mod *ed-r* c skey))))
+      (list msg r c uuid))))
+
+(defun verify-hmac (quad)
+  (assert (consp quad))
+  (assert (= 4 (length quad)))
+  (destructuring-bind (msg r c uuid) quad
+    (let* ((pkey (ed-decompress-pt (gethash uuid *uuid-pkey*)))
+           (vpt  (ed-add (ed-nth-pt r)
+                         (ed-mul pkey c)))
+           (cc   (hash-pt-msg vpt msg)))
+      (values msg (= cc c))
+      )))
+
+#|
+x(let* ((*uuid-pkey* (make-hash-table))
+       (keying  (multiple-value-list (ed-random-pair)))
+       (uuid    (uuid:uuid-to-integer (uuid:make-v1-uuid)))
+       (msg     "this is a test"))
+  (setf (gethash uuid *uuid-pkey*) (ed-compress-pt (second keying)))
+  (let ((quad  (make-hmac msg (first keying) uuid)))
+    (multiple-value-bind (msgr ver) (verify-hmac quad)
+      (assert ver)
+      msgr)))
+
+(defvar *k* (multiple-value-list (ed-random-pair)))
+(defvar *u* (uuid:uuid-to-integer (uuid:make-v1-uuid)))
+(setf (gethash *u* *uuid-pkey*) (ed-compress-pt (second *k*)))
+(make-hmac "this is a test" (first *k*) *u*)
+ |#
