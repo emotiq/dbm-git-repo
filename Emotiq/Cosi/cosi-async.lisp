@@ -378,16 +378,19 @@
 
 (defvar *dly-instr*
   (ac:make-actor
-   (let ((data nil))
+   (let ((data   nil)
+         (pltsym 'plt))
      (um:dlambda
        (:incr (dly)
         #+:LISPWORKS
         (push dly data))
        (:clr ()
-        (setf dly nil))
+        (setf data nil))
+       (:pltwin (sym)
+        (setf pltsym sym))
        (:plt ()
         #+:LISPWORKS
-        (plt:histogram 'histo data
+        (plt:histogram pltsym data
                        :clear  t
                        :ylog   t
                        :thick  2
@@ -857,15 +860,21 @@
 			(format t "~%~D actual witnesses" (length (third (third *x*))))))
 		 ))
         (send *dly-instr* :clr)
+        (send *dly-instr* :pltwin :histo-4)
+        (sleep 1)
 	(print "4 Executives")
 	(doit)
 	(print "------------------------------------------------")
         (send *dly-instr* :plt)
-        (sleep 5)
+        (sleep 1)
 	(set-executive-pool 1)
+        (send *dly-instr* :clr)
+        (send *dly-instr* :pltwin :histo-1)
+        (sleep 1)
 	(print "1 Executive")
 	(doit)
-	
+        (send *dly-instr* :plt)
+	(sleep 1)
 	(print "------------------------------------------------")
 	(print "Verify signature")
 	(set-executive-pool 4)

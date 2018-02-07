@@ -578,8 +578,7 @@
      (let ((ans (ignore-errors (parse-integer (read-line s nil nil)))))
        (or (and (integerp ans)
                 ans)
-           4)))
-   t)
+           4))))
   #+:CLOZURE
   (ccl:cpu-count)
   #-(or :CLOZURE (AND :LISPWORKS :MACOSX)) 4)

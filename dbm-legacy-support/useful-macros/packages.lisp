@@ -820,6 +820,8 @@
    #:merge-kvs
 
    #:nest
+   #:fst
+   #:snd
    ))
 
 #|

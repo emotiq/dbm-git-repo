@@ -2984,3 +2984,11 @@ or list acceptable to the reader macros #+ and #-."
           r
           :from-end t))
 
+(defun fst (a b)
+  (declare (ignore b))
+  a)
+
+(defun snd (a b)
+  (declare (ignore a))
+  b)
+

@@ -76,9 +76,6 @@
   (make-array *bins-per-node*
               :initial-element nil))
 
-(defmethod node-load ((x null))
-  0)
-
 (defclass node ()
   ((ip       :accessor node-ip       ;; IPv4 string for this node
              :initarg  :ip)
@@ -115,8 +112,22 @@
              :initarg  :self)
    ))
 
+(defmethod iteri-subs ((node node) fn)
+  (loop for sub across (node-subs node)
+        for ix from 0
+        when sub
+        do (funcall fn ix sub)))
+
 (defmethod iter-subs ((node node) fn)
-  (map nil fn (node-subs node)))
+  (iteri-subs node (lambda (ix sub)
+                     (declare (ignore ix))
+                     (funcall fn sub))))
+
+(defmethod set-node-load (node)
+  (setf (node-load node)
+        (1+ (loop for sub across (node-subs node)
+                  when sub
+                  sum  (node-load sub)))))
 
 ;; --------------------------------------------------------------------
 ;; For now, 4 different ways to specify a node:
@@ -180,32 +191,34 @@
 ;; -------------------------------------------------------------------
 ;; Node construction
 
-(defun inner-make-node-tree (ip vlist &optional parent)
+(defun partition (node ip-list &key (key 'identity))
+  (let* ((bins  (make-subs))
+         (nbins (length bins))
+         (vnode (dotted-string-to-integer (node-ip node))))
+    (mapc (lambda (ip-arg)
+            (let* ((vip (dotted-string-to-integer (funcall key ip-arg)))
+                   (ix  (mod (logxor vnode vip) nbins)))
+              (push ip-arg (aref bins ix))))
+          ip-list)
+    (setf (node-subs node) bins)))
+
+(defun inner-make-node-tree (ip ip-list &optional parent)
   (multiple-value-bind (ipstr uuid pkeyzkp)
       (gen-node-id ip)
     (let ((node (make-node ipstr uuid pkeyzkp parent)))
-      (when vlist
-        (let* ((ipv   (dotted-string-to-integer ipstr))
-               (dists (mapcar (lambda (v)
-                                (let* ((vstr (if (consp v)
-                                                 (car v)
-                                               v))
-                                       (vv (dotted-string-to-integer vstr)))
-                                  (logxor ipv vv)))
-                              vlist))
-               (bins  (make-subs)))
-          (mapc (lambda (dist v)
-                  (let ((ix (mod dist (length bins))))
-                    (push v (aref bins ix))))
-                dists vlist)
-          (loop for cell across bins
-                for ix from 0
-                do
-                (when cell
-                  (setf (aref bins ix) (inner-make-node-tree (car cell) (cdr cell) node))))
-          (setf (node-subs node) bins
-                (node-load node) (1+ (reduce '+ (map 'vector 'node-load bins))))
-          ))
+      (when ip-list
+        (let ((bins (partition node ip-list
+                               :key (lambda (ip-arg)
+                                      (if (consp ip-arg)
+                                          (car ip-arg)
+                                        ip-arg)))))
+          (iteri-subs node
+                      (lambda (ix subs)
+                        (setf (aref bins ix)
+                              (inner-make-node-tree (car subs)
+                                                    (cdr subs)
+                                                    node))))
+          (set-node-load node)))
       node)))
 
 (defun make-node-tree (ip vlist)
@@ -225,7 +238,7 @@
     nil)
   
   (defmethod children ((node node) layout)
-    (coerce (node-subs node) 'list))
+    (remove nil (coerce (node-subs node) 'list)))
 
   (defun split-to-octets (val)
     (um:nlet-tail iter ((n   4)
@@ -448,84 +461,59 @@
 ;; ---------------------------------------------------------------
 ;; New leader node election... tree rearrangement
 
-(defun do-rearrange-tree (parent node nlist)
-  (if nlist
-      (let* ((node-v (dotted-string-to-integer (node-ip node)))
-             (dists (mapcar (lambda (sub-node)
-                              (let ((sub-node-v (dotted-string-to-integer
-                                                 (node-ip sub-node))))
-                                (logxor node-v sub-node-v)))
-                            nlist))
-             (bins  (make-subs))
-             (nbins (length bins)))
-        (mapc (lambda (dist sub-node)
-                (push sub-node (aref bins (mod dist nbins))))
-              dists nlist)
-        (loop for cell across bins
-              for ix from 0
-              do
-              (when cell
-                (setf (aref bins ix) (do-rearrange-tree node (car cell) (cdr cell)))
-                ))
-        (setf (node-subs node) bins))
-    ;; else - node is a leaf
-    (setf (node-subs node) (make-subs)))
-  
-  (setf (node-parent node) parent
-        (node-load node) (1+ (reduce '+ (map 'vector 'node-load (node-subs node))))
-        ))
+(defun notify-real-descendents (node &rest msg)
+  (labels ((recurse (sub-node)
+             (if (node-realnode sub-node)
+                 (apply 'send sub-node msg)
+               (iter-subs sub-node #'recurse))))
+    (iter-subs node #'recurse)))
 
-(defun node-rearrange-tree (node new-leader-ip)
-  (labels ((recurse (node)
-             (when node
-               (if (node-realnode node)
-                   (send node :election new-leader-ip)
-                 (iter-subs node #'recurse)))))
-    (iter-subs node #'recurse))
-  (when (node-realnode node)
-    (let* ((new-leader-node (gethash new-leader-ip *ip-node-tbl*))
-           (all-nodes (delete new-leader-node
-                              (maphash (lambda (k v)
-                                         (declare (ignore k))
-                                         v)
-                                       *ip-node-tbl*))))
-      (do-rearrange-tree nil new-leader-node all-nodes)
-      (setf *top-node* new-leader-node))))
+(defun all-nodes-except (node)
+  (delete node
+          (um:accum acc
+            (maphash (um:compose #'acc 'um:snd) *ip-node-tbl*))))
 
-(defun elect-new-leader (new-leader-ip)
+(defun node-model-rebuild-tree (parent node nlist)
+  (let ((bins (partition node nlist
+                         :key 'node-ip)))
+    (iteri-subs node
+                (lambda (ix subs)
+                  (setf (aref bins ix)
+                        (node-model-rebuild-tree node
+                                                 (car subs)
+                                                 (cdr subs)))))
+    (setf (node-parent node) parent)
+    (set-node-load node)
+    node))
+
+(defun node-elect-new-leader (new-leader-ip)
   (let ((new-top-node (gethash new-leader-ip *ip-node-tbl*)))
-    (labels ((recurse (node)
-               (when node
-                 (if (node-realnode node)
-                     (send node :election new-leader-ip)
-                   (iter-subs node #'recurse))))
-             (all-nodes ()
-               ;; all nodes except new-top-node
-               (delete new-top-node
-                       (maphash (lambda (k v)
-                                  (declare (ignore k))
-                                  v)
-                                *ip-node-tbl*))))
-      (cond ((null new-top-node)
-             (error "Not a valid leader node: ~A" new-leader-ip))
-            ((eq new-top-node *top-node*)
-             ;; nothing to do here...
-             )
-            ((eq *top-node* *my-node*)
-             ;; I'm obviously here
-             (iter-subs *my-node* #'recurse)
-             (setf *top-node* new-top-node)
-             (node-model-rearrange-tree new-top-node (all-nodes)))
-            (t
-             (send *top-node* :election new-leader-ip) ;; what if *top-node* is deaf?
-             )
-            ))))
-
-(defun node-model-rearrange-tree (node nlist)
-  (declare (ignore node nlist))
-  (NYI 'node-model-rearrange-tree))
+    ;; Maybe... ready for prime time?
+    (cond ((null new-top-node)
+           (error "Not a valid leader node: ~A" new-leader-ip))
+          ((eq new-top-node *top-node*)
+           ;; nothing to do here...
+           )
+          (t
+           (setf *top-node* new-top-node)
+           (node-model-rebuild-tree nil new-top-node
+                                    (all-nodes-except new-top-node))
+           ;;
+           ;; The following broadcast will cause us to get another
+           ;; notification, but by then the *top-node* will already
+           ;; have been set to new-leader-ip, and so no endless loop
+           ;; will occur.
+           ;;
+           (notify-real-descendents new-top-node :election new-leader-ip))
+          )))
 
 ;; ---------------------------------------------------------
+;; Node insertion/change
+
+(defun bin-for-ip (node ip)
+  (let ((vnode  (dotted-string-to-integer (node-ip node)))
+        (vip    (dotted-string-to-integer ip)))
+    (mod (logxor vnode vip) (length (node-subs node)))))
 
 (defun increase-loading (parent-node)
   (when parent-node
@@ -535,14 +523,12 @@
 (defun node-model-insert-node (node new-node-info)
   ;; info is (ipv4 UUID pkeyzkp)
   (destructuring-bind (ipstr uuid pkeyzkp) new-node-info
-    (let* ((node-v   (dotted-string-to-integer (node-ip node)))
-           (new-v    (dotted-string-to-integer ipstr))
+    (let* ((ix       (bin-for-ip node ipstr))
            (bins     (node-subs node))
-           (ix       (mod (logxor node-v new-v) (length bins)))
            (sub-node (aref bins ix)))
       (if sub-node
           ;; continue in parallel with our copy of tree
-          (node-insert-node sub-node new-node-info)
+          (node-model-insert-node sub-node new-node-info)
         ;; else
         (let ((new-node (make-node ipstr uuid pkeyzkp node)))
           (setf (node-real-ip new-node)  ipstr
@@ -554,60 +540,40 @@
         ))))
 
 (defun node-insert-node (node new-node-info)
-  (labels ((recurse (node)
-             (when node
-               (if (node-realnode node)
-                   (send node :insert-node new-node-info)
-                 (map nil #'recurse (node-subs node))))
-             ))
-    (map nil #'recurse (node-subs node))
-    (destructuring-bind (ipstr uuid pkeyzkp) new-node-info
-      (let ((new-node (gethash ipstr *ip-node-tbl*)))
-        (if new-node ;; already present in tree?
-            ;; maybe caller just wants to change UUID or keying
-            ;; won't be able to sign unless it know skey
-            (multiple-value-bind (pkey ok) (check-pkey pkeyzkp)
-              (when ok
-                (setf (node-uuid new-node)     uuid
-                      (node-pkeyzkp new-node)  pkeyzkp
-                      (node-pkey new-node)     pkey ;; cache the decompressed key
-                      (node-realnode new-node) t
-                      (node-real-ip new-node)  ipstr)))
-          ;; else - not already present
-          (node-model-insert-node *top-node* new-node-info))
-        ))))
+  (destructuring-bind (ipstr uuid pkeyzkp) new-node-info
+    (let ((new-node (gethash ipstr *ip-node-tbl*)))
+      (if new-node ;; already present in tree?
+          ;; maybe caller just wants to change UUID or keying
+          ;; won't be able to sign unless it know skey
+          (multiple-value-bind (pkey ok) (check-pkey pkeyzkp)
+            (when ok
+              (setf (node-uuid new-node)     uuid
+                    (node-pkeyzkp new-node)  pkeyzkp
+                    (node-pkey new-node)     pkey ;; cache the decompressed key
+                    (node-realnode new-node) t
+                    (node-real-ip new-node)  ipstr)))
+        ;; else - not already present
+        (node-model-insert-node *top-node* new-node-info))))
+  (notify-real-descendents node :insert-node new-node-info))
 
 ;; ---------------------------------------------------------
-
-(defun reduce-loading (parent-node)
-  (when parent-node
-    (decf (node-load parent-node))
-    (reduce-loading (node-parent parent-node))))
 
 (defun node-model-remove-node (gone-node)
   (remhash (node-ip gone-node)   *ip-node-tbl*)
   (remhash (node-uuid gone-node) *uuid-node-tbl*)
   (let ((pcmpr (third (node-pkeyzkp gone-node))))
     (remhash pcmpr *pkey-node-tbl*)
-    (remhash pcmpr *pkey-skey-tbl*))
-  (let ((parent (node-parent gone-node)))
-    (when parent
-      (let* ((subs (node-subs parent))
-             (pos  (position gone-node subs)))
-        (setf (aref subs pos) nil))
-      (reduce-loading parent))
-    ))
+    (remhash pcmpr *pkey-skey-tbl*)))
 
 (defun node-remove-node (node gone-node-ipv4)
   (let ((gone-node (gethash gone-node-ipv4 *ip-node-tbl*)))
     (when gone-node
-      (labels ((recurse (node)
-                 (when node
-                   (if (node-realnode node)
-                       (send node :remove-node gone-node-ipv4)
-                     (map nil #'recurse (node-subs node))))))
-        (map nil #'recurse (node-subs node))
-        (node-model-remove-node gone-node)))))
+      (node-model-remove-node gone-node)
+      ;; must rebuild tree to absorb node's subnodes
+      (node-model-rebuild-tree nil *top-node*
+                               (all-nodes-except *top-node*))
+      (when (eq node *top-node*)
+        (notify-real-descendents node :remove-node gone-node-ipv4)))))
   
 ;; -----------------------------------------------------------------
 
@@ -658,8 +624,7 @@
       (node-remove-node node node-ip))
      
      (:election (new-leader-ip)
-      (NYI :election)
-      (node-rearrange-tree *top-node* new-leader-ip))
+      (node-elect-new-leader new-leader-ip))
 
      ;; -------------------------------
      ;; internal comms between Cosi nodes
