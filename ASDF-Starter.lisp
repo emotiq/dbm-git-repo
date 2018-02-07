@@ -117,6 +117,9 @@ ASDF:*CENTRAL-REGISTRY*."
         (when (directory asd-candidate)
           (pushnew dir-candidate asdf:*central-registry* :test #'equal))))))
 
+;; ---------------------------------------------------------------
+;; DM/Emotiq 01/18 -- blame me for this #+:ALLEGRO stuff...
+
 #+:ALLEGRO
 (defun walk-directory-for-asdf (dir)
   "Looks into the directory DIR and all subdirectories and adds
@@ -138,6 +141,7 @@ ASDF:*CENTRAL-REGISTRY*."
 	(let ((asd-candidate (merge-pathnames "*.asd" dir-candidate)))
 	  (when (directory asd-candidate)
 	    (pushnew dir-candidate asdf:*central-registry* :test #'equal)))))))
+;; ---------------------------------------------------------------
 
 #+:CLOZURE
 (defun walk-directory-for-asdf (dir)
