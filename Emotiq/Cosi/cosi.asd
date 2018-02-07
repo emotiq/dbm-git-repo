@@ -25,6 +25,6 @@
                  :core-crypto
                  :lisp-object-encoder
                  :useful-macros
-                 #+:LISPWORKS :butterfly
+		 :usocket
                  ))
 

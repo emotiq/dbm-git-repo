@@ -294,9 +294,10 @@ INTERNAL-TIME-UINITS-PER-SECOND which gives the ticks per count for the current 
 (defmethod print-object :around ((id uuid) stream)
   (if *print-readably*
       (progn
-        (format stream "#$(UUID ")
+        ;; (format stream "#$(UUID ")
+        (format stream "#.(~S \"" 'uuid)
         (call-next-method)
-        (format stream ")"))
+        (format stream "\")"))
     (call-next-method)))
 
 
