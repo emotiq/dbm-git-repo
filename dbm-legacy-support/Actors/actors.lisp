@@ -215,10 +215,7 @@
                 :initarg  :timeout-fn)
    ;; currently active timer - when nil => none
    (timer       :accessor recv-info-timer
-                :initarg  :timer)
-   (hook        :accessor recv-info-hook
-                :initarg  :hook
-                :initform nil)))
+                :initarg  :timer)))
 
 ;; ----------------------------------------
 ;; RECV handlers...
@@ -240,13 +237,11 @@
                (eq (recv-info-id info) timer-id)) ;; was it the same one as for timer?
       (setf (actor-recv-info self) nil) ;; terminate RECV
       (enqueue-replay self info)        ;; prep for life after RECV
-      (when-let (fn (recv-info-hook info))
-        (funcall fn nil))
       (if-let (fn (recv-info-timeout-fn info))
           (funcall fn)
         (error "RECV Timeout")))))
          
-(defmethod actor-recv-setup ((self actor) conds-fn timeout-fn timeout-expr hook-fn)
+(defmethod actor-recv-setup ((self actor) conds-fn timeout-fn timeout-expr)
   ;; setup a new RECV control block in the current Actor, hence
   ;; activating RECV behavior until we find a message we want, or
   ;; else timeout waiting for one.
@@ -257,7 +252,6 @@
                          :selector-fn conds-fn
                          :timeout-fn  timeout-fn
                          :timer       (make-timeout-timer timeout-expr self this-id)
-                         :hook        hook-fn
                          ))))
 
 ;; -------------------------------------------------------------
@@ -286,8 +280,6 @@
            (when-let (timer (recv-info-timer info))
              (unschedule-timer timer))
            (enqueue-replay self info) ;; prep for life after RECV
-           (when-let (fn (recv-info-hook info))
-             (funcall fn t))
            (funcall ans-fn))          ;; handle the message
 
           (t 

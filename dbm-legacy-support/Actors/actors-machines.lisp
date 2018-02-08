@@ -30,13 +30,10 @@
       (find-kw-assoc :TIMEOUT clauses)
     (multiple-value-bind (on-timeout on-timeout-present-p clauses)
         (find-kw-assoc :ON-TIMEOUT clauses)
-      (multiple-value-bind (hook-fn hook-fn-present-p clauses)
-          (find-kw-assoc :HOOK clauses)
-        (values clauses
-                timeout    timeout-present-p
-                on-timeout on-timeout-present-p
-                hook-fn    hook-fn-present-p)
-        ))))
+      (values clauses
+              timeout    timeout-present-p
+              on-timeout on-timeout-present-p)
+      )))
 
 (defun parse-pattern-clauses (clauses)
   `(lambda-match  ;; returns NIL on no matching message, as we need
@@ -55,15 +52,14 @@
 (defun parse-recv-clauses (clauses)
   (multiple-value-bind (new-clauses
                         timeout-expr      timeout-present-p
-                        on-timeout-clause on-timeout-present-p
-                        hook-fn           hook-fn-present-p)
+                        on-timeout-clause on-timeout-present-p)
       (parse-clauses clauses)
-    (declare (ignore timeout-present-p hook-fn-present-p))
+    (declare (ignore timeout-present-p))
     (let* ((conds-fn       (parse-pattern-clauses new-clauses))
            (timeout-fn     (when on-timeout-present-p
                              `(lambda ()
                                 ,on-timeout-clause))))
-      (values conds-fn timeout-fn timeout-expr hook-fn))))
+      (values conds-fn timeout-fn timeout-expr))))
 
 ;; -----------------------------------------------------------
 ;; RECV -- selective retrieval of messages
@@ -107,11 +103,11 @@
   ;; it receives some message that causes it to execute a branch of
   ;; code contained in the RECV form.
   ;;
-  (multiple-value-bind (conds-fn timeout-fn timeout-expr hook-fn)
+  (multiple-value-bind (conds-fn timeout-fn timeout-expr)
       (parse-recv-clauses clauses)
     `(self-call
       :recv-setup-{204E1756-D84E-11E7-9D93-985AEBDA9C2A}
-      ,conds-fn ,timeout-fn ,timeout-expr ,hook-fn)
+      ,conds-fn ,timeout-fn ,timeout-expr)
     ))
 
 ;; ----------------------------------------------------------------------------------
