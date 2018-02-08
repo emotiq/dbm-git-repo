@@ -114,8 +114,8 @@
              :initform nil)
    (load     :accessor node-load     ;; cpu loading of group for this node
              :initform 1)
-   (aidtbl   :accessor node-aid-tbl  ;; dir of actors at this node
-             :intitform (make-hash-table))
+   (session  :accessor node-session  ;; used by leader node for unique session ID
+             :initform 0)
    (self     :accessor node-self     ;; ptr to Actor handler
              :initarg  :self)
    ))
@@ -610,7 +610,7 @@
 
 (defvar *aid-tbl*  (make-hash-table))
 
-(defmethod unregister-return-address ((ret return-addr))
+(defmethod unregister-return-addr ((ret return-addr))
   (remhash (return-addr-aid ret) *aid-tbl*))
 
 (defun make-return-addr (node)
@@ -618,7 +618,7 @@
     (setf (gethash aid *aid-tbl*) (ac:current-actor))
     (make-instance 'return-addr
                    :ip  (node-real-ip node)
-                   :aid aid)
+                   :aid aid)))
    
 ;; -------------------------------------------------------
 
@@ -731,7 +731,7 @@
 (defmethod dest-ip ((ref node-ref))
   (dest-ip (node-ref-ip ref)))
 
-(defmethod dest-ip ((ret return-address))
+(defmethod dest-ip ((ret return-addr))
   (gethash (return-addr-aid ret) *aid-tbl*))
 
 ;; --------------------------------------------------------------
@@ -772,18 +772,6 @@
            (h    (hash-pt-msg vpt msg)))
       (= h c))
     ))
-
-(defun node-compute-cosi (node msg)
-  (declare (ignore node msg))
-  (NYI 'node-compute-cosi))
-
-(defun node-cosi-commitment (node msg seq)
-  (declare (ignore node msg seq))
-  (NYI 'node-cosi-commitment))
-
-(defun node-cosi-signing (node c seq)
-  (declare (ignore node c seq))
-  (NYI 'node-cosi-signing))
 
 ;; -----------------------------------------------------------------------
 
@@ -858,7 +846,7 @@
 
 ;; -----------------------------------------------------------------------
 
-(defun get-sub-commitment (msg seq-id)
+(defun sub-commitment (msg seq-id)
   (=lambda (node)
     (let ((start    (get-universal-time))
           (timeout  (* (node-load node) *default-timeout-period*))
@@ -874,7 +862,7 @@
                    ((list* :commit sub-seq ans)
                     (cond ((eql sub-seq seq-id)
                            (!dly)
-                           (unregister-return-address ret-addr)
+                           (unregister-return-addr ret-addr)
                            (=values ans))
                           (t (wait))
                           ))
@@ -883,7 +871,7 @@
                    :ON-TIMEOUT (progn
                                  (become 'do-nothing)
                                  (!dly)
-                                 (unregister-return-address ret-addr)
+                                 (unregister-return-addr ret-addr)
                                  (=values nil))
                    )))
         (wait)))))
@@ -906,7 +894,7 @@
               (node-seq   node) seq-id
               (node-parts node) nil)
         (=bind (lst)
-            (pmapcar (get-subcommitment msg seq-id) subs)
+            (pmapcar (sub-commitment msg seq-id) subs)
           (labels ((fold-answer (ans sub)
                      (cond ((null ans)
                             (mark-node-no-response node sub))
@@ -935,12 +923,12 @@
                        (/ (- (get-universal-time) start)
                           timeout *default-timeout-period*)))
                (wait ()
-                 (node-recv (node)
+                 (recv
                    ((list :signed sub-seq ans)
                     (if (eql sub-seq seq-id)
                         (progn
                           (!dly)
-                          (unregister-return-address ret-addr)
+                          (unregister-return-addr ret-addr)
                           (=values ans))
                       ;; else
                       (wait)))
@@ -950,7 +938,7 @@
                     (if (eql sub-seq seq-id)
                         (progn
                           (!dly)
-                          (unregister-return-address ret-addr)
+                          (unregister-return-addr ret-addr)
                           (=values nil))
                       ;; else
                       (wait)))
@@ -959,12 +947,12 @@
                    :ON-TIMEOUT (progn
                                  (become 'do-nothing)
                                  (!dly)
-                                 (unregister-return-address ret-addr)
+                                 (unregister-return-addr ret-addr)
                                  (=values nil))
                    )))
         (wait)))))
     
-(defun node-compute-signature (node c seq-id)
+(defun node-cosi-signing (node reply-to c seq-id)
   ;;
   ;; Second phase of Cosi:
   ;;   Given challenge value c, compute the signature value
@@ -996,7 +984,7 @@
       (send reply-to :invalid-commitment seq-id) ;; request restart
       ))
 
-(defun node-compute-cosi (node reply-to msg)
+(defun node-compute-cosi (node msg)
   ;; top-level entry for Cosi signature creation
   ;; assume for now that leader cannot be corrupted...
   (let ((self (current-actor)))
@@ -1014,7 +1002,7 @@
                               (recv
                                 ((list :signed seq2 r)
                                  (cond ((eql seq2 seq)
-                                        (send reply-to :signature msg
+                                        (list :signature msg
                                               (list c    ;; cosi signature
                                                     r
                                                     tparts)))
@@ -1025,7 +1013,7 @@
                                  (cond ((eql seq2 seq)
                                         ;; retry from start
                                         (print "Signing restart")
-                                        (node-compute-cosi node reply-to msg))
+                                        (node-compute-cosi node msg))
                                        (t
                                         (wait-signing))
                                        ))

@@ -869,11 +869,12 @@
                          (print "--------------")
                          (format t "~%Create ~a node multi-signature" *nbr-nodes*)
                          (wall-time
-                           (setf ac::*mbsends* 0)
+                           ;; (setf ac::*mbsends* 0)
                            (send *top-node* :cosi mbox msg)
                            (xtime (setf *x* (mpcompat:mailbox-read mbox)))
                            (format t "~%~D actual witnesses" (length (third (third *x*))))
-                           (format t "~%~D MP:MAILBOX-SEND/RECEIVE" ac::*mbsends*))))
+                           ;; (format t "~%~D MP:MAILBOX-SEND/RECEIVE" ac::*mbsends*)
+                           )))
                  #+:LISPWORKS
                  (hcl:stop-profiling)))
         (send *dly-instr* :clr)
