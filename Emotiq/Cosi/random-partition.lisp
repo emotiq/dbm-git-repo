@@ -67,9 +67,12 @@
 (defvar *real-nodes*  (mapcar 'cdr *local-nodes*))
 (defvar *leader-node* (get-local-ipv4 "Dachshund.local"))
 
+(defvar *top-node*   nil) ;; current leader node
+(defvar *my-node*    nil) ;; which node my machine is on
+
 ;; default-timeout-period needs to be made smarter, based on node height in tree
 (defparameter *default-timeout-period*   ;; good for 1600 nodes on single machine
-  #+:LISPWORKS   4
+  #+:LISPWORKS   70
   #+:ALLEGRO     2
   #+:CLOZURE     4)
 
@@ -101,6 +104,8 @@
    (subs     :accessor node-subs     ;; list of group members beyond self
              :initarg  :subs
              :initform (make-subs))
+   (bit      :accessor node-bit      ;; bit position in bitmap
+             :initform 0)
    ;; -------------------------------------
    (real-ip  :accessor node-real-ip  ;; real node for this node
              :initarg  :real-ip)
@@ -114,8 +119,6 @@
              :initform nil)
    (load     :accessor node-load     ;; cpu loading of group for this node
              :initform 1)
-   (session  :accessor node-session  ;; used by leader node for unique session ID
-             :initform 0)
    (self     :accessor node-self     ;; ptr to Actor handler
              :initarg  :self)
    ))
@@ -159,7 +162,7 @@
   (let* ((cmpr-pkey (third pkeyzkp))
          (node (make-instance 'node
                               :ip      ipstr
-                              :uuid    (uuid:uuid-to-integer uuid)
+                              :uuid    uuid
                               :skey    (gethash cmpr-pkey *pkey-skey-tbl*)
                               :pkey    (edec:ed-decompress-pt cmpr-pkey)
                               :pkeyzkp pkeyzkp
@@ -185,6 +188,9 @@
   #+:OPENMCL   (need-to-specify)
   #+:ALLEGRO   (need-to-specify))
 
+(defun gen-uuid-int ()
+  (uuid:uuid-to-integer (uuid:make-v1-uuid)))
+
 (defun gen-node-id (ip)
   (if (consp ip)
       (values-list ip)
@@ -192,9 +198,44 @@
       (let ((zkp (compute-pkey-zkp skey pkey)))
         (setf (gethash (third zkp) *pkey-skey-tbl*) skey)
         (values ip
-                (uuid:make-v1-uuid)
+                (gen-uuid-int)
                 zkp)
         ))))
+
+;; -------------------------------------------------------------
+
+(defvar *node-bit-tbl* #())
+
+(defun assign-bits ()
+  ;; assign bit positions to each node
+  (let ((bit  0))
+    (setf *node-bit-tbl*
+          (coerce
+           (um:accum acc
+             (maphash (lambda (k node)
+                        (declare (ignore k))
+                        (setf (node-bit node) bit
+                              bit             (1+ bit))
+                        (acc node))
+                      *ip-node-tbl*))
+           'vector))
+    ))
+
+(defun decode-short-bitmap (n)
+  (let ((nsh (ash n -1)))
+    (cond ((logbitp 0 n)
+           (logxor nsh (1- (ash 1 (length *node-bit-tbl*)))))
+          (t
+           nsh)
+          )))
+
+(defun encode-short-bitmap (n)
+  ;; return the shorter (maybe) of n and its complement,
+  ;; encoding complement status in LSB of shifted number
+  (let* ((nn    (ash n 1))
+         (nbits (integer-length nn))
+         (nc    (ldb (byte nbits 0) (lognot nn))))
+    (min nn nc)))
 
 ;; -------------------------------------------------------------------
 ;; Node construction
@@ -388,15 +429,14 @@
                    *pkey-skey-tbl*)
           (with-standard-io-syntax
             (pprint keys f))))
-      
+      (assign-bits)
       #+:LISPWORKS (view-tree main-tree)
-      main-tree)))
+      (setf *my-node*  main-tree
+            *top-node* main-tree)
+      )))
 
 ;; ---------------------------------------------------------------
 ;; Tree reconstruction from startup init files
-
-(defvar *top-node*   nil)
-(defvar *my-node*    nil)
 
 (defun reconstruct-tree (&key fname)
   ;; read the keying file
@@ -433,8 +473,7 @@
                (dolist (ip lst)
                  (destructuring-bind (ipstr uuid zkp) ip
                    (assert (null (gethash ipstr *ip-node-tbl*)))
-                   (setf uuid (uuid:uuid-to-integer uuid))
-                   (assert (null (gethash uuid *uuid-node-tbl*)))
+                   (assert (null (gethash uuid  *uuid-node-tbl*)))
                    (destructuring-bind (r c pcmpr) zkp
                      (declare (ignore r c))
                      (assert (null (gethash pcmpr *pkey-node-tbl*)))
@@ -462,6 +501,7 @@
     
     ;; reconstruct the trees
     (let ((main-tree  (gen-main-tree leader real-nodes grps)))
+      (assign-bits)
       #+:LISPWORKS (view-tree main-tree)
       (setf *top-node* main-tree
             *my-node*  (gethash (get-my-ipv4) *ip-node-tbl*)))))
@@ -613,11 +653,11 @@
 (defmethod unregister-return-addr ((ret return-addr))
   (remhash (return-addr-aid ret) *aid-tbl*))
 
-(defun make-return-addr (node)
-  (let ((aid  (gensym "aid-")))
+(defmethod make-return-addr ((ipv4 string))
+  (let ((aid  (gen-uuid-int)))
     (setf (gethash aid *aid-tbl*) (ac:current-actor))
     (make-instance 'return-addr
-                   :ip  (node-real-ip node)
+                   :ip  ipv4
                    :aid aid)))
    
 ;; -------------------------------------------------------
@@ -644,7 +684,7 @@
      ;; user accessible entry points - directed to leader node
      
      (:cosi (reply-to msg)
-      (reply reply-to (node-compute-cosi node msg)))
+      (node-compute-cosi node reply-to msg))
 
      (:validate (reply-to msg sig)
       (reply reply-to :validation (node-validate-cosi node msg sig)))
@@ -677,7 +717,7 @@
       (ac:pr msg))
 
      (t (&rest msg)
-        (error "Unknown message: ~A" msg))
+        (error "Unknown message: ~A~%Node: ~A" msg (node-ip node)))
      ))
 
 #|
@@ -701,7 +741,7 @@ Connecting to #$(NODE "10.0.1.6" 65000)
   (socket-send ref (node-ref-ip ref) msg))
 
 (defmethod send ((ref return-addr) &rest msg)
-  (socket-send (return-addr-ip ref) (return-addr-ip ref) msg))
+  (socket-send ref (return-addr-ip ref) msg))
 
 (defmethod send ((node null) &rest msg)
   (ac:pr msg)
@@ -723,10 +763,12 @@ Connecting to #$(NODE "10.0.1.6" 65000)
                               (node-skey *my-node*)
                               (node-uuid *my-node*)))
          (agent-ip (format nil "eval@~A" real-ip)))
+    ;; (format t "~%SOCKET-SEND: ~A ~A ~A" ip real-ip msg)
     #+:LISPWORKS
     (bfly:! agent-ip `(forwarding ,ip ',quad))))
 
 (defun forwarding (dest quad)
+  ;; (format t "~%FORWARDING: ~A ~A" dest quad)
   (multiple-value-bind (msg t/f) (verify-hmac quad)
     ;; might want to log incomings that fail the HMAC
     ;; just dropping on floor here...
@@ -775,16 +817,17 @@ Connecting to #$(NODE "10.0.1.6" 65000)
   ;; toplevel entry for Cosi signature validation checking
   (declare (ignore node)) ;; not needed here...
   (destructuring-bind (c r ids) sig
-    (let* ((tkey (reduce (lambda (ans id)
-                           (let ((node (gethash id *uuid-node-tbl*)))
-                             (ed-add ans (node-pkey node))))
-                         ids
-                         :initial-value (ed-neutral-point)))
-           (vpt  (ed-add (ed-nth-pt r)
-                         (ed-mul tkey c)))
-           (h    (hash-pt-msg vpt msg)))
-      (= h c))
-    ))
+    (let ((tkey  (ed-neutral-point))
+          (idd   (decode-short-bitmap ids)))
+      (loop for node across *node-bit-tbl* do
+            (when (and node
+                       (logbitp (node-bit node) idd))
+              (setf tkey (ed-add tkey (node-pkey node)))))
+      (let* ((vpt  (ed-add (ed-nth-pt r)
+                           (ed-mul tkey c)))
+             (h    (hash-pt-msg vpt msg)))
+        (= h c))
+      )))
 
 ;; -----------------------------------------------------------------------
 
@@ -846,11 +889,11 @@ Connecting to #$(NODE "10.0.1.6" 65000)
 
 ;; -----------------------------------------------------------------------
 
-(defun sub-commitment (msg seq-id)
+(defun sub-commitment (my-ip msg seq-id)
   (=lambda (node)
     (let ((start    (get-universal-time))
           (timeout  (* (node-load node) *default-timeout-period*))
-          (ret-addr (make-return-addr (node-parent node))))
+          (ret-addr (make-return-addr my-ip)))
       (send node :commitment ret-addr msg seq-id)
       (labels ((!dly ()
                  #+:LISPWORKS
@@ -891,40 +934,42 @@ Connecting to #$(NODE "10.0.1.6" 65000)
   ;;
   (when (msg-ok msg node)
     (let ((subs   (group-subs node))
-          (tparts (list (node-uuid node))))
+          (bits   (ash 1 (node-bit node))))
       (multiple-value-bind (v vpt) (ed-random-pair)
         (setf (node-v     node) v
               (node-seq   node) seq-id
               (node-parts node) nil)
         (=bind (lst)
-            (pmapcar (sub-commitment msg seq-id) subs)
+            (pmapcar (sub-commitment (node-real-ip node) msg seq-id) subs)
           (labels ((fold-answer (ans sub)
                      (cond ((null ans)
                             (mark-node-no-response node sub))
                            (t
-                            (destructuring-bind (pt plst) ans
-                              (push sub (node-parts node))
-                              (setf tparts (nconc plst tparts)
-                                    vpt    (ed-add vpt (ed-decompress-pt pt)))
+                            (destructuring-bind (sub-pt sub-bits) ans
+                              (push sub  (node-parts node))
+                              (setf bits (logior bits
+                                                 (decode-short-bitmap sub-bits))
+                                    vpt  (ed-add vpt (ed-decompress-pt sub-pt)))
                               ))
                            )))
             (mapc #'fold-answer lst subs)
-            (send reply-to :commit seq-id (ed-compress-pt vpt) tparts)
+            (send reply-to :commit seq-id (ed-compress-pt vpt)
+                  (encode-short-bitmap bits))
             ))))))
 
 ;; ------------------------------
 
-(defun sub-signing (c seq-id)
+(defun sub-signing (my-ip c seq-id)
   (=lambda (node)
     (let ((start    (get-universal-time))
           (timeout  (* (node-load node) *default-timeout-period*))
-          (ret-addr (make-return-addr (node-parent node))))
+          (ret-addr (make-return-addr my-ip)))
       (send node :signing ret-addr c seq-id)
       (labels ((!dly ()
                  #+:LISPWORKS
                  (send *dly-instr* :incr
                        (/ (- (get-universal-time) start)
-                          timeout *default-timeout-period*)))
+                          timeout)))
                (wait ()
                  (recv
                    ((list :signed sub-seq ans)
@@ -973,7 +1018,7 @@ Connecting to #$(NODE "10.0.1.6" 65000)
                               (mult-mod *ed-r* c (node-skey node))))
             (missing nil))
         (=bind (lst)
-            (pmapcar (sub-signing c seq-id) (node-parts node))
+            (pmapcar (sub-signing (node-real-ip node) c seq-id) (node-parts node))
           (labels ((fold-answer (ans sub)
                      (cond ((null ans)
                             (mark-node-no-response node sub)
@@ -990,42 +1035,48 @@ Connecting to #$(NODE "10.0.1.6" 65000)
       (send reply-to :invalid-commitment seq-id) ;; request restart
       ))
 
-(defun node-compute-cosi (node msg)
-  ;; top-level entry for Cosi signature creation
-  ;; assume for now that leader cannot be corrupted...
-  (let ((self (current-actor)))
-    (ac:self-call :commitment self (incf (node-session node)) msg)
+;; -----------------------------------------------------------
+
+(defun try-cosi (my-ip reply-to msg)
+  (let ((ret  (make-return-addr my-ip))
+        (sess (gen-uuid-int)))
+    ;; (ac:pr :try-cosi)
+    (send *top-node* :commitment ret msg sess)
     (labels
         ((wait-commitment ()
            (recv
-             ((list :commit seq vpt tparts)
-              (cond ((eql seq (node-session node))
+             ((list :commit seq vpt bits)
+              (cond ((eql seq sess)
                      ;; compute global challenge                         
                      (let ((c  (hash-pt-msg (ed-decompress-pt vpt) msg)))
-                       (ac:self-call :signing self c seq)
+                       (send *top-node* :signing ret c sess)
                        (labels
                            ((wait-signing ()
                               (recv
-                                ((list :signed seq2 r)
-                                 (cond ((eql seq2 seq)
-                                        (list :signature msg
-                                              (list c    ;; cosi signature
-                                                    r
-                                                    tparts)))
+                                ((list :signed seq r)
+                                 (cond ((eql seq sess)
+                                        (unregister-return-addr ret)
+                                        (reply reply-to
+                                               (list :signature msg
+                                                     (list c    ;; cosi signature
+                                                           r
+                                                           (encode-short-bitmap bits)))))
                                        (t
                                         (wait-signing))
                                        ))
-                                ((list :missing-node seq2)
-                                 (cond ((eql seq2 seq)
+                                ((list :missing-node seq)
+                                 (cond ((eql seq sess)
                                         ;; retry from start
+                                        (unregister-return-addr ret)
                                         (print "Signing restart")
-                                        (node-compute-cosi node msg))
+                                        (try-cosi my-ip reply-to msg))
                                        (t
                                         (wait-signing))
                                        ))
-                                
-                                ((list :invalid-commitment seq2)
-                                 (cond ((eql seq2 seq)
+                              
+                                ((list :invalid-commitment seq)
+                                 (cond ((eql seq sess)
+                                        (unregister-return-addr ret)
                                         (error "Invalid commitment"))
                                        (t
                                         (wait-signing))
@@ -1037,6 +1088,58 @@ Connecting to #$(NODE "10.0.1.6" 65000)
                     )))))
       (wait-commitment))))
 
+(defun node-compute-cosi (node reply-to msg)
+  ;; top-level entry for Cosi signature creation
+  ;; assume for now that leader cannot be corrupted...
+  (spawn 'try-cosi (node-real-ip node) reply-to msg))
+
+#|
+;; FOR TESTING!!!
+(set-executive-pool 1)
+
+(setf *real-nodes* (list *leader-node*))
+
+(setf *real-nodes* (remove "rambdo" *real-nodes*
+                           :key 'car
+                           :test 'string-equal))
+
+(generate-tree :nel 100)
+
+(defun tst ()
+  (spawn
+   (lambda ()
+     (send *dly-instr* :clr)
+     (send *dly-instr* :pltwin :histo-4)
+     (let ((ret   (make-return-addr (node-real-ip *my-node*)))
+           (start (get-universal-time)))
+       (send *top-node* :cosi ret "This is a test message!")
+       (recv
+         ((list :answer
+                (and msg
+                     (list :signature txt
+                           (and sig (list _ _ bits)))))
+          (send *dly-instr* :plt)
+          (ac:pr
+           (format nil "Total Witnesses: ~D" (logcount (decode-short-bitmap bits)))
+           msg
+           (format nil "Duration = ~A" (- (get-universal-time) start)))
+          
+          (send *my-node* :validate ret txt sig)
+          (recv
+            ((list :answer :validation t)
+             (unregister-return-addr ret)
+             (ac:pr :valid-signature))
+            
+            (msg
+             (unregister-return-addr ret)
+             (error "ValHuh?: ~A" msg))
+            ))
+            
+         (msg
+          (unregister-return-addr ret)
+          (error "Huh? ~A" msg))
+         )))))
+ |#
 ;; -------------------------------------------------------------
 
        
