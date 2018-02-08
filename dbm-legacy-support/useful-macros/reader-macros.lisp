@@ -470,11 +470,10 @@ of the #> reader macro
 (defun get-$-dispatch-reader (key)
   (gethash (string key) $-reader-macros key))
 
+#|
 (set-dispatch-macro-character
  #\# #\$ '|reader-for-#$|)
 
-
-#|
 (set-$-dispatch-reader :test (lambda (&rest data)
                                (match data
                                  ((x) :when (numberp x) (/ x))
