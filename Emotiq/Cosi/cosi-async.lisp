@@ -393,12 +393,15 @@
         (plt:histogram pltsym data
                        :clear  t
                        :ylog   t
+                       :xrange '(0 1.2)
                        :thick  2
                        ;; :cum    t
                        :norm   nil
                        :title  "Measured Delay Ratios"
                        :xtitle "Delay-Ratio"
-                       :ytitle "Counts"))
+                       :ytitle "Counts")
+        (plt:plot pltsym '(1 1) '(0.1 1e6)
+                  :color :red))
        ))))
 
 ;; ----------------------------------------------------------------------
@@ -833,6 +836,9 @@
        (do-wall-time #',g!fun))))
 
 (defmacro xtime (form)
+  #+:xLISPWORKS
+  `(hcl:extended-time ,form)
+  #-:xLISPWORKS
   form)
 
 (defun tst-build (n)
@@ -852,13 +858,24 @@
   (let ((msg "this is a test"))
     (with-borrowed-mailbox (mbox)
       (labels ((doit ()
-		 (loop repeat 3 do
-		       (format t "~%Create ~a node multi-signature" *nbr-nodes*)
-		       (wall-time
-			(send *top-node* :cosi mbox msg)
-			(xtime (setf *x* (mpcompat:mailbox-read mbox)))
-			(format t "~%~D actual witnesses" (length (third (third *x*))))))
-		 ))
+                 #+:LISPWORKS
+                 (hcl:set-up-profiler :call-counter t)
+                 #+:LISPWORKS
+                 (hcl:start-profiling :processes ac::*executive-processes*
+                                      :initialize t
+                                      :time :extended)
+                 (progn ;; hcl:extended-time
+                   (loop repeat 3 do
+                         (print "--------------")
+                         (format t "~%Create ~a node multi-signature" *nbr-nodes*)
+                         (wall-time
+                           (setf ac::*mbsends* 0)
+                           (send *top-node* :cosi mbox msg)
+                           (xtime (setf *x* (mpcompat:mailbox-read mbox)))
+                           (format t "~%~D actual witnesses" (length (third (third *x*))))
+                           (format t "~%~D MP:MAILBOX-SEND/RECEIVE" ac::*mbsends*))))
+                 #+:LISPWORKS
+                 (hcl:stop-profiling)))
         (send *dly-instr* :clr)
         (send *dly-instr* :pltwin :histo-4)
         (sleep 1)

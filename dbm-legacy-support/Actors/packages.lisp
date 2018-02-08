@@ -122,6 +122,7 @@
    #:with-cont
    #:with-future
    #:pmapcar
+   #:pmap
    #:par
    #:with-futures
    #:pfirst

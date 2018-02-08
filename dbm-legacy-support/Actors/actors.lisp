@@ -215,7 +215,10 @@
                 :initarg  :timeout-fn)
    ;; currently active timer - when nil => none
    (timer       :accessor recv-info-timer
-                :initarg  :timer)))
+                :initarg  :timer)
+   (hook        :accessor recv-info-hook
+                :initarg  :hook
+                :initform nil)))
 
 ;; ----------------------------------------
 ;; RECV handlers...
@@ -237,11 +240,13 @@
                (eq (recv-info-id info) timer-id)) ;; was it the same one as for timer?
       (setf (actor-recv-info self) nil) ;; terminate RECV
       (enqueue-replay self info)        ;; prep for life after RECV
+      (when-let (fn (recv-info-hook info))
+        (funcall fn nil))
       (if-let (fn (recv-info-timeout-fn info))
           (funcall fn)
         (error "RECV Timeout")))))
          
-(defmethod actor-recv-setup ((self actor) conds-fn timeout-fn timeout-expr)
+(defmethod actor-recv-setup ((self actor) conds-fn timeout-fn timeout-expr hook-fn)
   ;; setup a new RECV control block in the current Actor, hence
   ;; activating RECV behavior until we find a message we want, or
   ;; else timeout waiting for one.
@@ -252,6 +257,7 @@
                          :selector-fn conds-fn
                          :timeout-fn  timeout-fn
                          :timer       (make-timeout-timer timeout-expr self this-id)
+                         :hook        hook-fn
                          ))))
 
 ;; -------------------------------------------------------------
@@ -280,6 +286,8 @@
            (when-let (timer (recv-info-timer info))
              (unschedule-timer timer))
            (enqueue-replay self info) ;; prep for life after RECV
+           (when-let (fn (recv-info-hook info))
+             (funcall fn t))
            (funcall ans-fn))          ;; handle the message
 
           (t 
@@ -305,13 +313,13 @@
      ;; an incoming RECV timeout message
      (actor-recv-timeout self timer-id))
     
-    (:recv-setup-{204E1756-D84E-11E7-9D93-985AEBDA9C2A} (conds-fn timeout-fn timeout-expr)
+    (:recv-setup-{204E1756-D84E-11E7-9D93-985AEBDA9C2A} (&rest msg)
      ;; another RECV clause. If not already in a RECV clause, activate
      ;; it. Otherwise stash it as an internal RECV message to be run
      ;; after the current RECV clause finishes.
      (if-let (info (actor-recv-info self))
          (addq (recv-info-recvq info) msg)
-       (actor-recv-setup self conds-fn timeout-fn timeout-expr)))
+       (apply 'actor-recv-setup self msg)))
     
     (t (&rest msg)
        (cond ((actor-recv-info self)
@@ -860,6 +868,12 @@
         ;; else - empty lists, nothing to do
         (=values nil)))
     ))
+
+(defun as-list (seq)
+  (coerce seq 'list))
+
+(=defun pmap (fn &rest seqs)
+  (=apply '=pmapcar fn (mapcar 'as-list seqs)))
 
 (defun par-xform (pfn &rest clauses)
   ;; Internal transform function. Converts a list of clauses to a form

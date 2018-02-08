@@ -67,6 +67,12 @@
 (defvar *real-nodes*  (mapcar 'cdr *local-nodes*))
 (defvar *leader-node* (get-local-ipv4 "Dachshund.local"))
 
+;; default-timeout-period needs to be made smarter, based on node height in tree
+(defparameter *default-timeout-period*   ;; good for 1600 nodes on single machine
+  #+:LISPWORKS   4
+  #+:ALLEGRO     2
+  #+:CLOZURE     4)
+
 ;; ----------------------------------------------------------------------
 ;; Network Tree Nodes
 
@@ -108,6 +114,8 @@
              :initform nil)
    (load     :accessor node-load     ;; cpu loading of group for this node
              :initform 1)
+   (aidtbl   :accessor node-aid-tbl  ;; dir of actors at this node
+             :intitform (make-hash-table))
    (self     :accessor node-self     ;; ptr to Actor handler
              :initarg  :self)
    ))
@@ -594,6 +602,26 @@
                  :real-ip  (node-real-ip node)
                  :ip       (node-ip node)))
 
+(defclass return-addr ()
+  ((ip   :accessor return-addr-ip  ;; the real IPv4 for returns
+         :initarg  :ip)
+   (aid  :accessor return-addr-aid  ;; actor id for returns
+         :initarg  :aid)))
+
+(defvar *aid-tbl*  (make-hash-table))
+
+(defmethod unregister-return-address ((ret return-addr))
+  (remhash (return-addr-aid ret) *aid-tbl*))
+
+(defun make-return-addr (node)
+  (let ((aid  (gensym "aid-")))
+    (setf (gethash aid *aid-tbl*) (ac:current-actor))
+    (make-instance 'return-addr
+                   :ip  (node-real-ip node)
+                   :aid aid)
+   
+;; -------------------------------------------------------
+
 (defun make-node-dispatcher (node)
   ;; use indirection to node-dispatcher for while we are debugging and
   ;; extending the dispatcher. Saves reconstructing the tree every
@@ -602,6 +630,13 @@
    ;; one of these closures is stored in the SELF slot of every node
    (lambda (&rest msg)
      (apply 'node-dispatcher node msg))))
+
+(defun crash-recovery ()
+  (maphash (lambda (k node)
+             (declare (ignore k))
+             (setf (node-self node) (make-node-dispatcher node)))
+           *ip-node-tbl*))
+
 
 (defun node-dispatcher (node &rest msg)
    (um:dcase msg
@@ -629,11 +664,11 @@
      ;; -------------------------------
      ;; internal comms between Cosi nodes
      
-     (:commitment (msg seq)
-      (node-cosi-commitment node msg seq))
+     (:commitment (reply-to msg seq)
+      (node-cosi-commitment node reply-to msg seq))
 
-     (:signing   (c seq)
-      (node-cosi-signing node c seq))
+     (:signing (reply-to c seq)
+      (node-cosi-signing node reply-to c seq))
 
      ;; -----------------------------------
      
@@ -651,7 +686,10 @@
   (socket-send (node-ip node) (node-real-ip node) msg))
 
 (defmethod send ((ref node-ref) &rest msg)
-  (socket-send (node-ref-ip ref) (node-ref-real-ip ref) msg))
+  (socket-send ref (node-ref-ip ref) msg))
+
+(defmethod send ((ref return-addr) &rest msg)
+  (socket-send (return-addr-ip ref) (return-addr-ip ref) msg))
 
 (defmethod send ((node null) &rest msg)
   (ac:pr msg)
@@ -680,13 +718,21 @@
     ;; might want to log incomings that fail the HMAC
     ;; just dropping on floor here...
     (when t/f
-      (apply 'send (node-self (dest-ip dest)) msg))))
+      (let ((true-dest (dest-ip dest)))
+        (when true-dest
+          (apply 'send true-dest msg))))
+    ))
 
 (defmethod dest-ip ((ip string))
-  (gethash ip *ip-node-tbl*))
+  (let ((node (gethash ip *ip-node-tbl*)))
+    (when node
+      (node-self node))))
 
 (defmethod dest-ip ((ref node-ref))
   (dest-ip (node-ref-ip ref)))
+
+(defmethod dest-ip ((ret return-address))
+  (gethash (return-addr-aid ret) *aid-tbl*))
 
 ;; --------------------------------------------------------------
 
@@ -739,4 +785,264 @@
   (declare (ignore node c seq))
   (NYI 'node-cosi-signing))
 
+;; -----------------------------------------------------------------------
 
+(defparameter *dly-instr*
+  (ac:make-actor
+   (let ((data   nil)
+         (pltsym 'plt))
+     (um:dlambda
+       (:incr (dly)
+        #+:LISPWORKS
+        (push dly data))
+       (:clr ()
+        (setf data nil))
+       (:pltwin (sym)
+        (setf pltsym sym))
+       (:plt ()
+        #+:LISPWORKS
+        (plt:histogram pltsym data
+                       :clear  t
+                       :ylog   t
+                       :xrange '(0 1.2)
+                       :thick  2
+                       ;; :cum    t
+                       :norm   nil
+                       :title  "Measured Delay Ratios"
+                       :xtitle "Delay-Ratio"
+                       :ytitle "Counts")
+        (plt:plot pltsym '(1 1) '(0.1 1e6)
+                  :color :red))
+       ))))
+
+;; -----------------------------------------------------------------------
+
+(defmacro node-recv ((node) &rest clauses)
+  ;; Use hook to manage the node-self slot.
+  ;; This strikes me as inherently brittle in the face of crashes
+  ;; Need a way to reset all the nodes to initial state = (CRASH-RECOVERY)
+  (let ((g!node  (gensym "node-"))
+        (g!save  (gensym "save-")))
+    `(let* ((,g!node ,node)
+            (,g!save (shiftf (node-self ,g!node) (ac:current-actor))))
+       (recv
+         ,@clauses
+         :HOOK (lambda (t/f)
+                 (declare (ignore t/f))
+                 (setf (node-self ,g!node) ,g!save))
+         ))
+    ))
+
+#+:LISPWORKS
+(editor:setup-indent "node-recv" 1)
+
+;; -----------------------------------------------------------------------
+
+(defun msg-ok (msg node)
+  (declare (ignore msg node))
+  t) ;; for now... should look at node-byz to see how to mess it up
+
+(defun mark-node-no-response (node sub)
+  (declare (ignore node sub)) ;; for now
+  t)
+
+;; ---------------
+
+(defun send-subs (node &rest msg)
+  (iter-subs node (lambda (sub)
+                    (apply 'send sub msg))))
+
+(defun group-subs (node)
+  (um:accum acc
+    (iter-subs node #'acc)))
+
+;; -----------------------------------------------------------------------
+
+(defun get-sub-commitment (msg seq-id)
+  (=lambda (node)
+    (let ((start    (get-universal-time))
+          (timeout  (* (node-load node) *default-timeout-period*))
+          (ret-addr (make-return-addr (node-parent node))))
+      (send node :commitment ret-addr msg seq-id)
+      (labels ((!dly ()
+                 #+:LISPWORKS
+                 (send *dly-instr* :incr
+                       (/ (- (get-universal-time) start)
+                          timeout)))
+               (wait ()
+                 (recv
+                   ((list* :commit sub-seq ans)
+                    (cond ((eql sub-seq seq-id)
+                           (!dly)
+                           (unregister-return-address ret-addr)
+                           (=values ans))
+                          (t (wait))
+                          ))
+
+                   :TIMEOUT timeout
+                   :ON-TIMEOUT (progn
+                                 (become 'do-nothing)
+                                 (!dly)
+                                 (unregister-return-address ret-addr)
+                                 (=values nil))
+                   )))
+        (wait)))))
+
+(defun node-cosi-commitment (node reply-to msg seq-id)
+  ;;
+  ;; First phase of Cosi:
+  ;;   Decide if msg warrants a commitment. If so return a fresh
+  ;;   random value from the prime field isomorphic to the EC.
+  ;;   Hold onto that secret seed and return the random EC point.
+  ;;   Otherwise return a null value.
+  ;;
+  ;; We hold that value for the next phase of Cosi.
+  ;;
+  (when (msg-ok msg node)
+    (let ((subs   (group-subs node))
+          (tparts (list (node-uuid node))))
+      (multiple-value-bind (v vpt) (ed-random-pair)
+        (setf (node-v     node) v
+              (node-seq   node) seq-id
+              (node-parts node) nil)
+        (=bind (lst)
+            (pmapcar (get-subcommitment msg seq-id) subs)
+          (labels ((fold-answer (ans sub)
+                     (cond ((null ans)
+                            (mark-node-no-response node sub))
+                           (t
+                            (destructuring-bind (pt plst) ans
+                              (push sub (node-parts node))
+                              (setf tparts (nconc plst tparts)
+                                    vpt    (ed-add vpt (ed-decompress-pt pt)))
+                              ))
+                           )))
+            (mapc #'fold-answer lst subs)
+            (send reply-to :commit seq-id (ed-compress-pt vpt) tparts)
+            ))))))
+
+;; ------------------------------
+
+(defun sub-signing (c seq-id)
+  (=lambda (node)
+    (let ((start    (get-universal-time))
+          (timeout  (* (node-load node) *default-timeout-period*))
+          (ret-addr (make-return-addr (node-parent node))))
+      (send node :signing ret-addr c seq-id)
+      (labels ((!dly ()
+                 #+:LISPWORKS
+                 (send *dly-instr* :incr
+                       (/ (- (get-universal-time) start)
+                          timeout *default-timeout-period*)))
+               (wait ()
+                 (node-recv (node)
+                   ((list :signed sub-seq ans)
+                    (if (eql sub-seq seq-id)
+                        (progn
+                          (!dly)
+                          (unregister-return-address ret-addr)
+                          (=values ans))
+                      ;; else
+                      (wait)))
+                   
+                   ((list (or :missing-node
+                              :invalid-commitment) sub-seq)
+                    (if (eql sub-seq seq-id)
+                        (progn
+                          (!dly)
+                          (unregister-return-address ret-addr)
+                          (=values nil))
+                      ;; else
+                      (wait)))
+          
+                   :TIMEOUT timeout
+                   :ON-TIMEOUT (progn
+                                 (become 'do-nothing)
+                                 (!dly)
+                                 (unregister-return-address ret-addr)
+                                 (=values nil))
+                   )))
+        (wait)))))
+    
+(defun node-compute-signature (node c seq-id)
+  ;;
+  ;; Second phase of Cosi:
+  ;;   Given challenge value c, compute the signature value
+  ;;     r = v - c * skey.
+  ;;   If we decided against signing in the first phase,
+  ;;   then return a null value.
+  ;;
+  (if (and (integerp (node-v node))
+           (eql seq-id (node-seq node)))
+      (let ((subs    (node-parts node))
+            (r       (sub-mod *ed-r* (node-v node)
+                              (mult-mod *ed-r* c (node-skey node))))
+            (missing nil))
+        (=bind (lst)
+            (pmapcar (sub-signing c seq-id) (node-parts node))
+          (labels ((fold-answer (ans sub)
+                     (cond ((null ans)
+                            (mark-node-no-response node sub)
+                            (setf missing t))
+                           ((not missing)
+                            (setf r (add-mod *ed-r* r ans)))
+                           )))
+            (mapc #'fold-answer lst subs)
+            (if missing
+                (send reply-to :missing-node seq-id)
+              (send reply-to :signed seq-id r))
+            )))
+      ;; else -- bad state
+      (send reply-to :invalid-commitment seq-id) ;; request restart
+      ))
+
+(defun node-compute-cosi (node reply-to msg)
+  ;; top-level entry for Cosi signature creation
+  ;; assume for now that leader cannot be corrupted...
+  (let ((self (current-actor)))
+    (ac:self-call :commitment self (incf (node-session node)) msg)
+    (labels
+        ((wait-commitment ()
+           (recv
+             ((list :commit seq vpt tparts)
+              (cond ((eql seq (node-session node))
+                     ;; compute global challenge                         
+                     (let ((c  (hash-pt-msg (ed-decompress-pt vpt) msg)))
+                       (ac:self-call :signing self c seq)
+                       (labels
+                           ((wait-signing ()
+                              (recv
+                                ((list :signed seq2 r)
+                                 (cond ((eql seq2 seq)
+                                        (send reply-to :signature msg
+                                              (list c    ;; cosi signature
+                                                    r
+                                                    tparts)))
+                                       (t
+                                        (wait-signing))
+                                       ))
+                                ((list :missing-node seq2)
+                                 (cond ((eql seq2 seq)
+                                        ;; retry from start
+                                        (print "Signing restart")
+                                        (node-compute-cosi node reply-to msg))
+                                       (t
+                                        (wait-signing))
+                                       ))
+                                
+                                ((list :invalid-commitment seq2)
+                                 (cond ((eql seq2 seq)
+                                        (error "Invalid commitment"))
+                                       (t
+                                        (wait-signing))
+                                       ))
+                                )))
+                         (wait-signing))))
+                    (t
+                     (wait-commitment))
+                    )))))
+      (wait-commitment))))
+
+;; -------------------------------------------------------------
+
+       
