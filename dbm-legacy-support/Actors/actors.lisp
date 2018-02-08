@@ -22,7 +22,7 @@
   *current-actor*)
 
 (defvar *actor-ready-queue*  ;; a queue of pending Actor activations
-  (make-prio-mailbox :name "Actor Ready Queue"))
+  (make-prio-mailbox))
 
 (defvar *executive-processes* nil)  ;; the list of Executive threads
 

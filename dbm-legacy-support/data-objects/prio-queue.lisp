@@ -440,11 +440,11 @@
 
 #+:CLOZURE
 (progn
-  (defclass prio-mailbox (priq &key name)
+  (defclass prio-mailbox (priq)
     ((sem  :reader   prio-mailbox-sem
            :initform (mp:make-semaphore))))
   
-  (defun make-prio-mailbox ()
+  (defun make-prio-mailbox (&key name)
     (make-instance 'prio-mailbox))
   
   (defmethod mailbox-send ((mbox prio-mailbox) msg &key (prio 0))
@@ -472,11 +472,11 @@
 
 #+:ALLEGRO
 (progn
-  (defclass prio-mailbox (priq &key name)
+  (defclass prio-mailbox (priq)
     ((sem  :reader   prio-mailbox-sem
            :initform (mp:make-gate nil))))
 
-  (defun make-prio-mailbox ()
+  (defun make-prio-mailbox (&key name)
     (make-instance 'prio-mailbox))
   
   (defmethod mailbox-send ((mbox prio-mailbox) msg &key (prio 0))

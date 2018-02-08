@@ -711,6 +711,7 @@
                               (node-skey *my-node*)
                               (node-uuid *my-node*)))
          (agent-ip (format nil "eval@~A" real-ip)))
+    #+:LISPWORKS
     (bfly:! agent-ip `(forwarding ,ip ',quad))))
 
 (defun forwarding (dest quad)
@@ -775,6 +776,14 @@
 
 ;; -----------------------------------------------------------------------
 
+#-:LISPWORKS
+(defparameter *dly-instr*
+  (ac:make-actor
+   (lambda (&rest args)
+     (declare (ignore args))
+     t)))
+
+#+:LISPWORKS
 (defparameter *dly-instr*
   (ac:make-actor
    (let ((data   nil)
@@ -802,27 +811,6 @@
         (plt:plot pltsym '(1 1) '(0.1 1e6)
                   :color :red))
        ))))
-
-;; -----------------------------------------------------------------------
-
-(defmacro node-recv ((node) &rest clauses)
-  ;; Use hook to manage the node-self slot.
-  ;; This strikes me as inherently brittle in the face of crashes
-  ;; Need a way to reset all the nodes to initial state = (CRASH-RECOVERY)
-  (let ((g!node  (gensym "node-"))
-        (g!save  (gensym "save-")))
-    `(let* ((,g!node ,node)
-            (,g!save (shiftf (node-self ,g!node) (ac:current-actor))))
-       (recv
-         ,@clauses
-         :HOOK (lambda (t/f)
-                 (declare (ignore t/f))
-                 (setf (node-self ,g!node) ,g!save))
-         ))
-    ))
-
-#+:LISPWORKS
-(editor:setup-indent "node-recv" 1)
 
 ;; -----------------------------------------------------------------------
 
@@ -866,6 +854,9 @@
                            (=values ans))
                           (t (wait))
                           ))
+
+                   (_
+                    (wait))
 
                    :TIMEOUT timeout
                    :ON-TIMEOUT (progn
@@ -942,6 +933,9 @@
                           (=values nil))
                       ;; else
                       (wait)))
+
+                   (_
+                    (wait))
           
                    :TIMEOUT timeout
                    :ON-TIMEOUT (progn

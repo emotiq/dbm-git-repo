@@ -388,8 +388,8 @@
         (setf data nil))
        (:pltwin (sym)
         (setf pltsym sym))
+       #+:LISPWORKS
        (:plt ()
-        #+:LISPWORKS
         (plt:histogram pltsym data
                        :clear  t
                        :ylog   t
