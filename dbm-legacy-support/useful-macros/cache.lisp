@@ -6,16 +6,9 @@
 (in-package um.cache)
 
 ;; -----------------------------------------------------------
-
-#-:CLOZURE
-(eval-when (:compile-toplevel :load-toplevel :execute)
-  (defconstant +empty+      (gensym))
-  (defconstant +empty-cell+ (list +empty+)))
-
-#+:CLOZURE
-(defconstant +empty+      (gensym))
-#+:CLOZURE
-(defconstant +empty-cell+ (list +empty+))
+  
+(defconstant +empty+      (if (boundp '+empty+) +empty+ (gensym)))
+(defconstant +empty-cell+ (if (boundp '+empty-cell+) +empty-cell+ (list +empty+)))
 
 (defun cache (fn &key (test #'equal))
   ;; provide a simple 2-way associative cache on function fn
