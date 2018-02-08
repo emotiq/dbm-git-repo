@@ -521,7 +521,8 @@ built according code-char of each number in the uuid-string"
 (um:set-$-dispatch-reader :uuid
                           (lambda (sym)
                             ;; symbol or string acceptable
-|#                            (uuid:make-uuid-from-string (string sym))))
+                            (uuid:make-uuid-from-string (string sym))))
+|#
 
 (defun uuid (str)
   ;; string or symbol acceptable
