@@ -22,7 +22,7 @@
   *current-actor*)
 
 (defvar *actor-ready-queue*  ;; a queue of pending Actor activations
-  (make-prio-mailbox))
+  (make-prio-mailbox :name "Actor Ready Queue"))
 
 (defvar *executive-processes* nil)  ;; the list of Executive threads
 
@@ -305,13 +305,13 @@
      ;; an incoming RECV timeout message
      (actor-recv-timeout self timer-id))
     
-    (:recv-setup-{204E1756-D84E-11E7-9D93-985AEBDA9C2A} (&rest msg)
+    (:recv-setup-{204E1756-D84E-11E7-9D93-985AEBDA9C2A} (conds-fn timeout-fn timeout-expr)
      ;; another RECV clause. If not already in a RECV clause, activate
      ;; it. Otherwise stash it as an internal RECV message to be run
      ;; after the current RECV clause finishes.
      (if-let (info (actor-recv-info self))
          (addq (recv-info-recvq info) msg)
-       (apply 'actor-recv-setup self msg)))
+       (actor-recv-setup self conds-fn timeout-fn timeout-expr)))
     
     (t (&rest msg)
        (cond ((actor-recv-info self)
