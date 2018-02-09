@@ -73,8 +73,8 @@
 ;; default-timeout-period needs to be made smarter, based on node height in tree
 (defparameter *default-timeout-period*   ;; good for 1600 nodes on single machine
   #+:LISPWORKS   70
-  #+:ALLEGRO     2
-  #+:CLOZURE     4)
+  #+:ALLEGRO     70
+  #+:CLOZURE     70)
 
 ;; ----------------------------------------------------------------------
 ;; Network Tree Nodes
@@ -1043,7 +1043,12 @@ Connecting to #$(NODE "10.0.1.6" 65000)
     ;; (ac:pr :try-cosi)
     (send *top-node* :commitment ret msg sess)
     (labels
-        ((wait-commitment ()
+        ((unknown-message (msg)
+           (unregister-return-addr ret)
+           (become 'do-nothing)
+           (error "Unknown message: ~A" msg))
+         
+         (wait-commitment ()
            (recv
              ((list :commit seq vpt bits)
               (cond ((eql seq sess)
@@ -1055,37 +1060,55 @@ Connecting to #$(NODE "10.0.1.6" 65000)
                               (recv
                                 ((list :signed seq r)
                                  (cond ((eql seq sess)
+                                        ;; we completed successfully
                                         (unregister-return-addr ret)
+                                        (become 'do-nothing)
                                         (reply reply-to
                                                (list :signature msg
                                                      (list c    ;; cosi signature
                                                            r
                                                            (encode-short-bitmap bits)))))
                                        (t
+                                        ;; must have been a late arrival
                                         (wait-signing))
                                        ))
+                                
                                 ((list :missing-node seq)
                                  (cond ((eql seq sess)
                                         ;; retry from start
                                         (unregister-return-addr ret)
-                                        (print "Signing restart")
+                                        (print "Witness dropout, signing restart")
                                         (try-cosi my-ip reply-to msg))
                                        (t
+                                        ;; must have been a late arrival
                                         (wait-signing))
                                        ))
                               
                                 ((list :invalid-commitment seq)
                                  (cond ((eql seq sess)
                                         (unregister-return-addr ret)
-                                        (error "Invalid commitment"))
+                                        (print "Invalid commitment, signing restart")
+                                        (try-cosi my-ip reply-to msg))
+                                       
                                        (t
+                                        ;; must have been a late arrival
                                         (wait-signing))
                                        ))
+                                
+                                (msg
+                                 (unknown-message msg))
                                 )))
-                         (wait-signing))))
+                         (wait-signing))
+                       )) ;; end of big COND clause
+                    
                     (t
+                     ;; must have been a late arrival
                      (wait-commitment))
-                    )))))
+                    )) ;; end of message pattern
+             
+             (msg
+              (unknown-message msg))
+             )))
       (wait-commitment))))
 
 (defun node-compute-cosi (node reply-to msg)
@@ -1126,9 +1149,11 @@ Connecting to #$(NODE "10.0.1.6" 65000)
           
           (send *my-node* :validate ret txt sig)
           (recv
-            ((list :answer :validation t)
+            ((list :answer :validation t/f)
              (unregister-return-addr ret)
-             (ac:pr :valid-signature))
+             (if t/f
+                 (ac:pr :valid-signature)
+               (ac:pr :invalid-signature)))
             
             (msg
              (unregister-return-addr ret)

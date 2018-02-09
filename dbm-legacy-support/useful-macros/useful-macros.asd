@@ -43,7 +43,7 @@
                 ;; (:file "match-macro-ex3")
                 ;; (:file "monitor-macros")
                 (:file "memoize")
-                (:file "cache")
+                #-:ALLEGRO (:file "cache")
                 #+:WIN32 (:file "exec")
                 ;; (:file "lazy") ;; supplanted by a better, simpler, version
                 (:file "engfmt")
