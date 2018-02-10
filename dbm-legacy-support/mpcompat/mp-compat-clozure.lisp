@@ -159,6 +159,9 @@ The background version
 (defmacro with-spin-lock ((lock) &body body)
   `(with-lock (,lock) ,@body))
 
+(defmacro with-spinlock ((lock) &body body)
+  `(with-lock (,lock) ,@body))
+
 (defmacro with-lock ((lock &optional whostate timeout) &body body)
   "Wait for lock available, then execute the body while holding the lock."
   `(do-with-lock ,lock ,whostate ,timeout (lambda () ,@body)))
