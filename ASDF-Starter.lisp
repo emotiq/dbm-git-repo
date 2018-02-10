@@ -210,7 +210,7 @@ FASL version recompiles it."
       (asdf:perform (make-instance 'asdf:compile-op) c)
       (call-next-method))))
 
-(defun asdf (lib)
+(defun asdf (lib &rest args &key &allow-other-keys)
   "Shortcut for ASDF."
-  (asdf:oos 'asdf:load-op lib))
+  (apply 'asdf:oos 'asdf:load-op lib args))
 
