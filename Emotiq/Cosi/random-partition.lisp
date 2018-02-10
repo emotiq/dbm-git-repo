@@ -179,15 +179,38 @@
   (declare (ignore args))
   (error "Need to specify..."))
 
+#+:ALLEGRO
+(defun allegro-dotted-to-integer (string)
+  (multiple-value-bind (start end starts ends)
+      (#~m/^([0-9]+).([0-9]+).([0-9]+).([0-9]+)$/ string)
+    (declare (ignore start end))
+    (reduce (lambda (ans pair)
+              (destructuring-bind (start . end) pair
+                (logior (ash ans 8)
+                        (parse-integer string :start start :end end))))
+            (nreverse (pairlis (coerce starts 'list)
+                               (coerce ends   'list)))
+            :initial-value 0)))
+
+#+:ALLEGRO
+(defun allegro-integer-to-dotted (val)
+  (let ((parts (um:nlet-tail iter ((n   4)
+                                   (pos 0)
+                                   (ans nil))
+                 (if (zerop n)
+                     ans
+                   (iter (1- n) (+ pos 8) (cons (ldb (byte 8 pos) val) ans)))
+                 )))
+    (format nil "~{~d~^.~}" parts)))
+
 (defun dotted-string-to-integer (string)
   #+:LISPWORKS (comm:string-ip-address string)
   #+:OPENMCL   (ccl::dotted-to-ipaddr string)
-  #+:ALLEGRO   (need-to-specify))
+  #+:ALLEGRO   (allegro-dotted-to-integer string))
 
 (defun integer-to-dotted-string (val)
   #+:LISPWORKS (comm:ip-address-string val)
-  #+:OPENMCL   (need-to-specify)
-  #+:ALLEGRO   (need-to-specify))
+  #-:LISPWORKS (allegro-integer-to-dotted val))
 
 (defun gen-uuid-int ()
   (uuid:uuid-to-integer (uuid:make-v1-uuid)))
@@ -423,29 +446,27 @@
 ;; ---------------------------------------------------------------
 ;; Tree reconstruction from startup init files
 
+(defun read-data-file (path)
+  (with-open-file (f path
+                     :direction :input)
+    (read f)))
+      
 (defun reconstruct-tree (&key fname)
   ;; read the keying file
-  (let* ((keys        (read-from-string
-                       (#+:OPENMCL   uiop/stream::read-file-string
-                        #+:LISPWORKS hcl:file-string
-                        #+:ALLEGRO   need-to-specify
-                        (merge-pathnames
-                         #+:LISPWORKS
-                         (sys:get-folder-path :documents)
-                         #+(OR :ALLEGRO :OPENMCL)
-                         "~/Documents/"
-                         *default-key-file*))))
-
-         (data        (read-from-string
-                       (#+:OPENMCL   uiop/stream::read-file-string
-                        #+:LISPWORKS hcl:file-string
-                        #+:ALLEGRO   need-to-specify
-                        (merge-pathnames
-                         #+:LISPWORKS
-                         (sys:get-folder-path :documents)
-                         #+(OR :ALLEGRO :OPENMCL)
-                         "~/Documents/"
-                         (or fname *default-data-file*)))))
+  (let* ((key-path  (merge-pathnames
+                     #+:LISPWORKS
+                     (sys:get-folder-path :documents)
+                     #+(OR :ALLEGRO :OPENMCL)
+                     "~/Documents/"
+                     *default-key-file*))
+         (keys       (read-data-file key-path))
+         (data-path   (merge-pathnames
+                       #+:LISPWORKS
+                       (sys:get-folder-path :documents)
+                       #+(OR :ALLEGRO :OPENMCL)
+                       "~/Documents/"
+                       (or fname *default-data-file*)))
+         (data        (read-data-file data-path))
          (leader      (getf data :leader))
          (real-nodes  (getf data :real-nodes))
          (grps        (getf data :groups)))
@@ -745,31 +766,97 @@ Connecting to #$(NODE "10.0.1.6" 65000)
 ;; -----------------------------------------------------
 ;; THE SOCKET INTERFACE...
 ;; -----------------------------------------------------
+#+:LISPWORKS
+(progn
+  (defun socket-send (ip real-ip msg)
+    ;; replace this with USOCKETS protocol
+    (let* ((quad     (make-hmac msg
+                                (node-skey *my-node*)
+                                (node-uuid *my-node*)))
+           (agent-ip (format nil "eval@~A" real-ip)))
+      ;; (format t "~%SOCKET-SEND: ~A ~A ~A" ip real-ip msg)
+      #+:LISPWORKS
+      (bfly:! agent-ip `(forwarding ,ip ',quad))))
+  
+  (defun forwarding (dest quad)
+    ;; (format t "~%FORWARDING: ~A ~A" dest quad)
+    (multiple-value-bind (msg t/f) (verify-hmac quad)
+      ;; might want to log incomings that fail the HMAC
+      ;; just dropping on floor here...
+      (when t/f
+        (let ((true-dest (dest-ip dest)))
+          (when true-dest
+            (when (equal true-dest (node-self *my-node*))
+              (ac:pr
+               (format nil "forwarding-to-me: ~A" msg)))
+            (apply 'send true-dest msg))))
+      )))
 
-(defun socket-send (ip real-ip msg)
-  ;; replace this with USOCKETS protocol
-  (let* ((quad     (make-hmac msg
-                              (node-skey *my-node*)
-                              (node-uuid *my-node*)))
-         (agent-ip (format nil "eval@~A" real-ip)))
-    ;; (format t "~%SOCKET-SEND: ~A ~A ~A" ip real-ip msg)
-    #+:LISPWORKS
-    (bfly:! agent-ip `(forwarding ,ip ',quad))))
-
-(defun forwarding (dest quad)
-  ;; (format t "~%FORWARDING: ~A ~A" dest quad)
-  (multiple-value-bind (msg t/f) (verify-hmac quad)
-    ;; might want to log incomings that fail the HMAC
-    ;; just dropping on floor here...
-    (when t/f
-      (let ((true-dest (dest-ip dest)))
-        (when true-dest
-          (when (equal true-dest (node-self *my-node*))
-            (ac:pr
-             (format nil "forwarding-to-me: ~A" msg)))
-          (apply 'send true-dest msg))))
-    ))
-
+#-:LISPWORKS
+(progn
+  (defvar *cosi-port*         65001)
+  (defvar *cosi-server*         nil)
+  (defvar *max-buffer-length* 65500)
+  
+  (defun serve-cosi ()
+    (let* ((my-ip  (node-real-ip *my-node*))
+           (maxbuf (make-array *max-buffer-length*
+                               :element-type '(unsigned-byte 8)))
+	   (socket (usocket:socket-connect nil nil
+					   :protocol :datagram
+					   :local-host my-ip
+					   :local-port *cosi-port*
+					   )))
+      (pr :server-starting-up)
+      (unwind-protect
+          (loop
+	    (multiple-value-bind (buf buf-len rem-ip rem-port)
+		(usocket:socket-receive socket maxbuf (length maxbuf))
+	      (declare (ignore rem-ip rem-port))
+	      ;; (pr :sock-read buf-len rem-ip rem-port buf)
+	      (multiple-value-bind (ans err)
+		  (ignore-errors
+		   (loenc:decode buf))
+		(unless err
+		  (multiple-value-bind (ubv-msg t/f) (verify-hmac ans)
+		    (when t/f
+		      (destructuring-bind (dest &rest msg) ubv-msg
+			(let ((true-dest (dest-ip dest)))
+			  (when true-dest
+			    ;; for debug... -------------------
+			    (when (eq true-dest (node-self *my-node*))
+			      (pr (format nil "forwarding-to-me: ~A" msg)))
+			    ;; ------------------
+			    (apply 'send true-dest msg)))
+			))))
+		))))
+      (usocket:socket-close socket)
+      (pr :server-giving-up)
+      (setf *cosi-server* nil)
+      ))
+  
+  (defun start-server ()
+      (setf *cosi-server*
+            (mp:process-run-function "UDP Cosi Server"
+                                     'serve-cosi))
+      )
+  
+  (defun shutdown-server ()
+    (when *cosi-server*
+      (mp:process-kill *cosi-server*)))
+  
+  (defun socket-send (ip real-ip msg)
+    (let* ((quad     (make-hmac (list* ip msg)
+                                (node-skey *my-node*)
+                                (node-uuid *my-node*)))
+           (packet   (loenc:encode quad))
+           (socket   (usocket:socket-connect real-ip *cosi-port*
+                                             :protocol :datagram)))
+      ;; (pr :sock-send (length packet) real-ip packet)
+      (usocket:socket-send socket packet (length packet))
+      (usocket:socket-close socket)
+      )))
+  
 (defmethod dest-ip ((ip string))
   (let ((node (gethash ip *ip-node-tbl*)))
     (when node
@@ -913,7 +1000,7 @@ Connecting to #$(NODE "10.0.1.6" 65000)
                    :ON-TIMEOUT (progn
                                  (!dly)
                                  (unregister-return-addr ret-addr)
-                                 (pr (format nil "Timeout waiting for ~A" (node-ip node)))
+                                 (pr (format nil "SubCommitment timeout waiting for ~A" (node-ip node)))
                                  (=values nil))
                    )))
         (wait)))))
@@ -939,7 +1026,7 @@ Connecting to #$(NODE "10.0.1.6" 65000)
             (pmapcar (sub-commitment (node-real-ip node) msg seq-id) subs)
           (labels ((fold-answer (ans sub)
                      (cond ((null ans)
-                            (pr (format nil "No ccommitmemt: ~A" (node-ip sub)))
+                            (pr (format nil "No commitmemt: ~A" (node-ip sub)))
                             (mark-node-no-response node sub))
                            (t
                             (destructuring-bind (sub-pt sub-bits) ans
@@ -995,7 +1082,7 @@ Connecting to #$(NODE "10.0.1.6" 65000)
                    :ON-TIMEOUT (progn
                                  (!dly)
                                  (unregister-return-addr ret-addr)
-                                 (pr (format nil "Timeout waiting for ~A" (node-ip node)))
+                                 (pr (format nil "SubSigning timeout waiting for ~A" (node-ip node)))
                                  (=values nil))
                    )))
         (wait)))))
@@ -1183,6 +1270,9 @@ Connecting to #$(NODE "10.0.1.6" 65000)
 
 #|
 ;; FOR TESTING!!!
+
+(setup-server)
+
 (set-executive-pool 1)
 
 (setf *real-nodes* (list *leader-node*))
@@ -1243,3 +1333,10 @@ Connecting to #$(NODE "10.0.1.6" 65000)
 
 (defmethod damage ((node node) t/f)
   (setf (node-byz node) t/f))
+
+(defun init-sim ()
+  (shutdown-server)
+  (loop while *cosi-server* do
+	(sleep 1))
+  (reconstruct-tree)
+  (start-server))
