@@ -235,13 +235,16 @@
   (let ((bit  0))
     (setf *node-bit-tbl*
           (coerce
-           (um:accum acc
-             (maphash (lambda (k node)
-                        (declare (ignore k))
-                        (setf (node-bit node) bit
-                              bit             (1+ bit))
-                        (acc node))
-                      *ip-node-tbl*))
+           (sort
+            (um:accum acc
+              (maphash (lambda (k node)
+                         (declare (ignore k))
+                         (setf (node-bit node) bit
+                               bit             (1+ bit))
+                         (acc node))
+                       *ip-node-tbl*))
+            '<
+            :key 'node-uuid)
            'vector))
     ))
 
