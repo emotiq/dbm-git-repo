@@ -6,58 +6,57 @@
 (in-package um.cache)
 
 ;; -----------------------------------------------------------
-  
-(defconstant +empty+      (if (boundp '+empty+) +empty+ (gensym)))
-(defconstant +empty-cell+ (if (boundp '+empty-cell+) +empty-cell+ (list +empty+)))
+
+(defconstant +empty+      #())
+(defconstant +empty-cell+ (list +empty+))
 
 (defun cache (fn &key (test #'equal))
   ;; provide a simple 2-way associative cache on function fn
-  (um:ensure-lexical (:global +empty-cell+)
-    (let* ((cache (vector +empty-cell+ ;; = (cons +empty+ nil)
+  (let* ((cache (vector +empty-cell+ ;; = (cons +empty+ nil)
                         +empty-cell+))
-           (ix    0)
-           (self  nil))
-      (declare (fixnum ix)
-               ((vector cons 2) cache))
-      (setf self (um:dlambda
-                   (:clear ()
-                    (fill cache +empty-cell+))
-                   
-                   (:toggle-ix ()
-                    (setf ix (logxor ix 1)))
-                   
-                   (:set-values (vals &rest args)
-                    (assert (listp vals))
+         (ix    0)
+         (self  nil))
+    (declare (fixnum ix)
+             ((vector cons 2) cache))
+    (setf self (um:dlambda
+                 (:clear ()
+                  (fill cache +empty-cell+))
+                 
+                 (:toggle-ix ()
+                  (setf ix (logxor ix 1)))
+                 
+                 (:set-values (vals &rest args)
+                  (assert (listp vals))
+                  (values-list
+                   (let* ((v1 (aref cache ix)))
+                     (if (funcall test args (car v1))
+                         (setf (cdr v1) vals)
+                       ;; else
+                       (let ((v2  (aref cache (the fixnum (funcall self :toggle-ix)))))
+                         (setf (car v2) args
+                               (cdr v2) vals)
+                         )))))
+                 
+                 (:set (val &rest args)
+                  (apply self :set-values (list val) args))
+                 
+                 (t (&rest args)
                     (values-list
                      (let* ((v1 (aref cache ix)))
+                       (declare (cons v1))
                        (if (funcall test args (car v1))
-                           (setf (cdr v1) vals)
+                           (cdr v1)
                          ;; else
                          (let ((v2  (aref cache (the fixnum (funcall self :toggle-ix)))))
-                           (setf (car v2) args
-                                 (cdr v2) vals)
-                           )))))
-                   
-                   (:set (val &rest args)
-                    (apply self :set-values (list val) args))
-                   
-                   (t (&rest args)
-                      (values-list
-                       (let* ((v1 (aref cache ix)))
-                         (declare (cons v1))
-                         (if (funcall test args (car v1))
-                             (cdr v1)
-                           ;; else
-                           (let ((v2  (aref cache (the fixnum (funcall self :toggle-ix)))))
-                             (declare (cons v2))
-                             (if (funcall test args (car v2))
-                                 (cdr v2)
-                               ;; else
-                               (let ((ans (multiple-value-list (apply fn args))))
-                                 (setf (car v2) args
-                                       (cdr v2) ans))
-                               ))))))
-                   )))))
+                           (declare (cons v2))
+                           (if (funcall test args (car v2))
+                               (cdr v2)
+                             ;; else
+                             (let ((ans (multiple-value-list (apply fn args))))
+                               (setf (car v2) args
+                                     (cdr v2) ans))
+                             ))))))
+                 ))))
 
 (defun cacheize (fn-name)
   (unless (get fn-name 'cacheized)

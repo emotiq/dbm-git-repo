@@ -5,7 +5,7 @@
 ;;
 
 (defvar *gfc-cipher-file-encryption*
-  #$(uuid {DCBAEF2E-5A0D-11E1-A22D-C82A14446EA7}))
+  #.(uuid:uuid "{DCBAEF2E-5A0D-11E1-A22D-C82A14446EA7}"))
 
 (defun gfc-signature ()
   (uuid:uuid-to-byte-array *gfc-cipher-file-encryption*))
@@ -101,7 +101,7 @@
     ))
 
 (defvar *gfc-digester-salt*  #(38 94 18 19 218 150 110 155 30 252 213 91 228 195 122 215))
-(defvar *gfc-digester-nonce* (uuid:uuid-to-byte-array #$(uuid {726070FA-5B15-11E1-879E-C82A14446EA7})))
+(defvar *gfc-digester-nonce* (uuid:uuid-to-byte-array #.(uuid:uuid "{726070FA-5B15-11E1-879E-C82A14446EA7}")))
 
 (defun make-gfc-digester (key &key (salt *gfc-digester-salt*) (nonce *gfc-digester-nonce*))
   (make-gfc-cipher key

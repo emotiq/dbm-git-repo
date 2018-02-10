@@ -158,7 +158,7 @@
 ;; ECDSA
 
 (defvar *ecdsa-signature-hdr*
-  #$(uuid {F34476BA-2B3D-11E1-84AB-C82A14446EA7}))
+  #.(uuid:uuid "{F34476BA-2B3D-11E1-84AB-C82A14446EA7}"))
 
 (defun sign-with-hmac (hmac id)
   (let* ((d     (get-private-key id))
@@ -267,10 +267,10 @@
 ;; -------------------------------------------
 
 (defvar *aes-256-single-level-encryption*
-  #$(uuid {937F2BA2-2B3E-11E1-84AB-C82A14446EA7}))
+  #.(uuid:uuid "{937F2BA2-2B3E-11E1-84AB-C82A14446EA7}"))
 
 (defvar *aesx-256-single-level-encryption*
-  #$(uuid {8876C3CC-5C22-11E1-A65D-C82A14446EA7}))
+  #.(uuid:uuid "{8876C3CC-5C22-11E1-A65D-C82A14446EA7}"))
 
 (defun derive-engines-for-encryption (keys &optional (aes-mode :aesx))
   (with-kdf-fields (((ke 256)
@@ -289,10 +289,10 @@
 ;;
 
 (defvar *twofish-aes-256-dual-level-encryption*
-  #$(uuid {A8A231B4-2B3E-11E1-84AB-C82A14446EA7}))
+  #.(uuid:uuid "{A8A231B4-2B3E-11E1-84AB-C82A14446EA7}"))
 
 (defvar *twofish-aesx-256-dual-level-encryption*
-  #$(uuid {6CC8F500-5C22-11E1-A65D-C82A14446EA7}))
+  #.(uuid:uuid "{6CC8F500-5C22-11E1-A65D-C82A14446EA7}"))
 
 (defun derive-engines-for-two-level-encryption (keys &optional (aes-mode :aesx))
   (with-kdf-fields (((ke1 256)
@@ -340,7 +340,7 @@
 ;;
 
 (defvar *dh-b571-encryption*
-  #$(uuid {DD07E610-2B3E-11E1-84AB-C82A14446EA7}))
+  #.(uuid:uuid "{DD07E610-2B3E-11E1-84AB-C82A14446EA7}"))
 
 (defun dh-encrypt (msg kpub)
   ;; (validate-public-key kpub)
@@ -368,7 +368,7 @@
 ;;
 
 (defvar *psec-encryption-header*
-  #$(uuid {706DBB06-2B4D-11E1-84AB-C82A14446EA7}))
+  #.(uuid:uuid "{706DBB06-2B4D-11E1-84AB-C82A14446EA7}"))
 
 (defun psec-encrypt (msg kpub)
   ;; (validate-public-key kpub)
@@ -437,7 +437,7 @@
 ;;
 
 (defvar *dh-multiple-recipients*
-  #$(uuid {33954394-2B47-11E1-84AB-C82A14446EA7}))
+  #.(uuid:uuid "{33954394-2B47-11E1-84AB-C82A14446EA7}"))
 
 (defun encrypt-for-multiple-recipients (msg from-id to-ids)
   (with-progress-bar ()
@@ -532,7 +532,7 @@
 ;; ----------------------------------------------------------------
 
 (defvar *ibe-encryption*
-  #$(uuid {5A8D6AC4-2B44-11E1-84AB-C82A14446EA7}))
+  #.(uuid:uuid "{5A8D6AC4-2B44-11E1-84AB-C82A14446EA7}"))
 
 (defun encrypt-ibe (msg from-id to-id)
   ;; use twofish-aes encryption
@@ -557,10 +557,10 @@
       
 
 (defvar *twofish-aes-file-encryption*
-  #$(uuid {C2F02FF2-2B44-11E1-84AB-C82A14446EA7}))
+  #.(uuid:uuid "{C2F02FF2-2B44-11E1-84AB-C82A14446EA7}"))
 
 (defvar *twofish-aesx-file-encryption*
-  #$(uuid {2C174C28-5C22-11E1-A65D-C82A14446EA7}))
+  #.(uuid:uuid "{2C174C28-5C22-11E1-A65D-C82A14446EA7}"))
 
 (defun aes-encrypt-file-with-signature (fname-in fname-out key id)
   (check-paths-not-equal fname-in fname-out)

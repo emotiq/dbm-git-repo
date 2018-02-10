@@ -226,7 +226,7 @@
 ;; result should be #xA129CA6149BE45E5
  |#
 
-(fli:define-foreign-function (c_siphash_init #$(c-name "c_siphash_init") :source)
+(fli:define-foreign-function (c_siphash_init #.(c-name "c_siphash_init") :source)
     ((c   :int32)
      (d   :int32)
      (v0  :int64)
@@ -237,13 +237,13 @@
   :language :ansi-c
   :module :cryptolib)
 
-(fli:define-foreign-function (c_siphash_compression #$(c-name "c_siphash_compression") :source)
+(fli:define-foreign-function (c_siphash_compression #.(c-name "c_siphash_compression") :source)
     ((w   :uint64))
   :result-type :void
   :language :ansi-c
   :module :cryptolib)
 
-(fli:define-foreign-function (c_siphash_finalization #$(c-name "c_siphash_finalization") :source)
+(fli:define-foreign-function (c_siphash_finalization #.(c-name "c_siphash_finalization") :source)
     ()
   :result-type :uint64
   :language :ansi-c
@@ -282,7 +282,7 @@
   (c      :int32)
   (d      :int32))
 
-(fli:define-foreign-function (c_siphash #$(c-name "c_siphash") :source)
+(fli:define-foreign-function (c_siphash #.(c-name "c_siphash") :source)
     ((state (:pointer siphash_state))
      (wds   (:pointer :int64))
      (nwds  :int32))

@@ -40,7 +40,8 @@
    :do-nothing
    :make-actor
    :set-executive-pool
-   :with-borrowed-mailbox)
+   :with-borrowed-mailbox
+   :pr)
   (:export
    :generate-tree
    :reconstruct-tree
@@ -72,7 +73,7 @@
 
 ;; default-timeout-period needs to be made smarter, based on node height in tree
 (defparameter *default-timeout-period*   ;; good for 1600 nodes on single machine
-  #+:LISPWORKS   70
+  #+:LISPWORKS   10
   #+:ALLEGRO     70
   #+:CLOZURE     70)
 
@@ -220,22 +221,6 @@
                       *ip-node-tbl*))
            'vector))
     ))
-
-(defun decode-short-bitmap (n)
-  (let ((nsh (ash n -1)))
-    (cond ((logbitp 0 n)
-           (logxor nsh (1- (ash 1 (length *node-bit-tbl*)))))
-          (t
-           nsh)
-          )))
-
-(defun encode-short-bitmap (n)
-  ;; return the shorter (maybe) of n and its complement,
-  ;; encoding complement status in LSB of shifted number
-  (let* ((nn    (ash n 1))
-         (nbits (integer-length nn))
-         (nc    (ldb (byte nbits 0) (lognot nn))))
-    (min nn nc)))
 
 ;; -------------------------------------------------------------------
 ;; Node construction
@@ -642,6 +627,8 @@
                  :real-ip  (node-real-ip node)
                  :ip       (node-ip node)))
 
+;; ----------------------------
+
 (defclass return-addr ()
   ((ip   :accessor return-addr-ip  ;; the real IPv4 for returns
          :initarg  :ip)
@@ -651,7 +638,8 @@
 (defvar *aid-tbl*  (make-hash-table))
 
 (defmethod unregister-return-addr ((ret return-addr))
-  (remhash (return-addr-aid ret) *aid-tbl*))
+  (remhash (return-addr-aid ret) *aid-tbl*)
+  (become 'do-nothing))
 
 (defmethod make-return-addr ((ipv4 string))
   (let ((aid  (gen-uuid-int)))
@@ -735,7 +723,8 @@ Connecting to #$(NODE "10.0.1.6" 65000)
 ;; -----------------------------------------------------------
 
 (defmethod send ((node node) &rest msg)
-  (socket-send (node-ip node) (node-real-ip node) msg))
+  (unless (node-byz node)
+    (socket-send (node-ip node) (node-real-ip node) msg)))
 
 (defmethod send ((ref node-ref) &rest msg)
   (socket-send ref (node-ref-ip ref) msg))
@@ -775,6 +764,9 @@ Connecting to #$(NODE "10.0.1.6" 65000)
     (when t/f
       (let ((true-dest (dest-ip dest)))
         (when true-dest
+          (when (equal true-dest (node-self *my-node*))
+            (ac:pr
+             (format nil "forwarding-to-me: ~A" msg)))
           (apply 'send true-dest msg))))
     ))
 
@@ -817,17 +809,18 @@ Connecting to #$(NODE "10.0.1.6" 65000)
   ;; toplevel entry for Cosi signature validation checking
   (declare (ignore node)) ;; not needed here...
   (destructuring-bind (c r ids) sig
-    (let ((tkey  (ed-neutral-point))
-          (idd   (decode-short-bitmap ids)))
-      (loop for node across *node-bit-tbl* do
-            (when (and node
-                       (logbitp (node-bit node) idd))
-              (setf tkey (ed-add tkey (node-pkey node)))))
-      (let* ((vpt  (ed-add (ed-nth-pt r)
-                           (ed-mul tkey c)))
-             (h    (hash-pt-msg vpt msg)))
-        (= h c))
-      )))
+    (let* ((tkey  (reduce (lambda (ans node)
+                            (if (and node
+                                     (logbitp (node-bit node) ids))
+                                (ed-add ans (node-pkey node))
+                              ans))
+                          *node-bit-tbl*
+                          :initial-value (ed-neutral-point)))
+           (vpt  (ed-add (ed-nth-pt r)
+                         (ed-mul tkey c)))
+           (h    (hash-pt-msg vpt msg)))
+      (= h c))
+    ))
 
 ;; -----------------------------------------------------------------------
 
@@ -842,7 +835,7 @@ Connecting to #$(NODE "10.0.1.6" 65000)
 (defparameter *dly-instr*
   (ac:make-actor
    (let ((data   nil)
-         (pltsym 'plt))
+         (pltsym :plt))
      (um:dlambda
        (:incr (dly)
         #+:LISPWORKS
@@ -870,11 +863,11 @@ Connecting to #$(NODE "10.0.1.6" 65000)
 ;; -----------------------------------------------------------------------
 
 (defun msg-ok (msg node)
-  (declare (ignore msg node))
-  t) ;; for now... should look at node-byz to see how to mess it up
+  (declare (ignore msg))
+  (not (node-byz node))) ;; for now... should look at node-byz to see how to mess it up
 
 (defun mark-node-no-response (node sub)
-  (declare (ignore node sub)) ;; for now
+  (declare (ignore node sub))
   t)
 
 ;; ---------------
@@ -892,7 +885,9 @@ Connecting to #$(NODE "10.0.1.6" 65000)
 (defun sub-commitment (my-ip msg seq-id)
   (=lambda (node)
     (let ((start    (get-universal-time))
-          (timeout  (* (node-load node) *default-timeout-period*))
+          (timeout  10
+                    ;; (* (node-load node) *default-timeout-period*)
+                    )
           (ret-addr (make-return-addr my-ip)))
       (send node :commitment ret-addr msg seq-id)
       (labels ((!dly ()
@@ -907,7 +902,8 @@ Connecting to #$(NODE "10.0.1.6" 65000)
                            (!dly)
                            (unregister-return-addr ret-addr)
                            (=values ans))
-                          (t (wait))
+                          (t
+                           (wait))
                           ))
 
                    (_
@@ -915,9 +911,9 @@ Connecting to #$(NODE "10.0.1.6" 65000)
 
                    :TIMEOUT timeout
                    :ON-TIMEOUT (progn
-                                 (become 'do-nothing)
                                  (!dly)
                                  (unregister-return-addr ret-addr)
+                                 (pr (format nil "Timeout waiting for ~A" (node-ip node)))
                                  (=values nil))
                    )))
         (wait)))))
@@ -932,29 +928,28 @@ Connecting to #$(NODE "10.0.1.6" 65000)
   ;;
   ;; We hold that value for the next phase of Cosi.
   ;;
+  (setf (node-seq   node) seq-id
+        (node-parts node) nil)
   (when (msg-ok msg node)
     (let ((subs   (group-subs node))
           (bits   (ash 1 (node-bit node))))
       (multiple-value-bind (v vpt) (ed-random-pair)
-        (setf (node-v     node) v
-              (node-seq   node) seq-id
-              (node-parts node) nil)
+        (setf (node-v     node) v)
         (=bind (lst)
             (pmapcar (sub-commitment (node-real-ip node) msg seq-id) subs)
           (labels ((fold-answer (ans sub)
                      (cond ((null ans)
+                            (pr (format nil "No ccommitmemt: ~A" (node-ip sub)))
                             (mark-node-no-response node sub))
                            (t
                             (destructuring-bind (sub-pt sub-bits) ans
                               (push sub  (node-parts node))
-                              (setf bits (logior bits
-                                                 (decode-short-bitmap sub-bits))
+                              (setf bits (logior bits sub-bits)
                                     vpt  (ed-add vpt (ed-decompress-pt sub-pt)))
                               ))
                            )))
             (mapc #'fold-answer lst subs)
-            (send reply-to :commit seq-id (ed-compress-pt vpt)
-                  (encode-short-bitmap bits))
+            (send reply-to :commit seq-id (ed-compress-pt vpt) bits)
             ))))))
 
 ;; ------------------------------
@@ -962,7 +957,9 @@ Connecting to #$(NODE "10.0.1.6" 65000)
 (defun sub-signing (my-ip c seq-id)
   (=lambda (node)
     (let ((start    (get-universal-time))
-          (timeout  (* (node-load node) *default-timeout-period*))
+          (timeout  10
+                    ;; (* (node-load node) *default-timeout-period*)
+                    )
           (ret-addr (make-return-addr my-ip)))
       (send node :signing ret-addr c seq-id)
       (labels ((!dly ()
@@ -996,9 +993,9 @@ Connecting to #$(NODE "10.0.1.6" 65000)
           
                    :TIMEOUT timeout
                    :ON-TIMEOUT (progn
-                                 (become 'do-nothing)
                                  (!dly)
                                  (unregister-return-addr ret-addr)
+                                 (pr (format nil "Timeout waiting for ~A" (node-ip node)))
                                  (=values nil))
                    )))
         (wait)))))
@@ -1018,9 +1015,10 @@ Connecting to #$(NODE "10.0.1.6" 65000)
                               (mult-mod *ed-r* c (node-skey node))))
             (missing nil))
         (=bind (lst)
-            (pmapcar (sub-signing (node-real-ip node) c seq-id) (node-parts node))
+            (pmapcar (sub-signing (node-real-ip node) c seq-id) subs)
           (labels ((fold-answer (ans sub)
                      (cond ((null ans)
+                            (pr (format nil "No signing: ~A" (node-ip sub)))
                             (mark-node-no-response node sub)
                             (setf missing t))
                            ((not missing)
@@ -1036,16 +1034,14 @@ Connecting to #$(NODE "10.0.1.6" 65000)
       ))
 
 ;; -----------------------------------------------------------
-
+#|
 (defun try-cosi (my-ip reply-to msg)
   (let ((ret  (make-return-addr my-ip))
         (sess (gen-uuid-int)))
-    ;; (ac:pr :try-cosi)
     (send *top-node* :commitment ret msg sess)
     (labels
         ((unknown-message (msg)
            (unregister-return-addr ret)
-           (become 'do-nothing)
            (error "Unknown message: ~A" msg))
          
          (wait-commitment ()
@@ -1062,12 +1058,11 @@ Connecting to #$(NODE "10.0.1.6" 65000)
                                  (cond ((eql seq sess)
                                         ;; we completed successfully
                                         (unregister-return-addr ret)
-                                        (become 'do-nothing)
                                         (reply reply-to
                                                (list :signature msg
                                                      (list c    ;; cosi signature
                                                            r
-                                                           (encode-short-bitmap bits)))))
+                                                           bits))))
                                        (t
                                         ;; must have been a late arrival
                                         (wait-signing))
@@ -1115,6 +1110,76 @@ Connecting to #$(NODE "10.0.1.6" 65000)
   ;; top-level entry for Cosi signature creation
   ;; assume for now that leader cannot be corrupted...
   (spawn 'try-cosi (node-real-ip node) reply-to msg))
+|#
+
+(defun node-compute-cosi (node reply-to msg)
+  ;; top-level entry for Cosi signature creation
+  ;; assume for now that leader cannot be corrupted...
+  (let ((sess (gen-uuid-int))
+        (self (current-actor)))
+    (ac:self-call :commitment self msg sess)
+    (labels
+        ((unknown-message (msg)
+           (error "Unknown message: ~A" msg))
+         
+         (wait-commitment ()
+           (recv
+             ((list :commit seq vpt bits)
+              (cond ((eql seq sess)
+                     ;; compute global challenge                         
+                     (let ((c  (hash-pt-msg (ed-decompress-pt vpt) msg)))
+                       (ac:self-call :signing self c sess)
+                       (labels
+                           ((wait-signing ()
+                              (recv
+                                ((list :signed seq r)
+                                 (cond ((eql seq sess)
+                                        ;; we completed successfully
+                                        (reply reply-to
+                                               (list :signature msg
+                                                     (list c    ;; cosi signature
+                                                           r
+                                                           bits))))
+                                       (t
+                                        ;; must have been a late arrival
+                                        (wait-signing))
+                                       ))
+                                
+                                ((list :missing-node seq)
+                                 (cond ((eql seq sess)
+                                        ;; retry from start
+                                        (print "Witness dropout, signing restart")
+                                        (node-compute-cosi node reply-to msg))
+                                       (t
+                                        ;; must have been a late arrival
+                                        (wait-signing))
+                                       ))
+                              
+                                ((list :invalid-commitment seq)
+                                 (cond ((eql seq sess)
+                                        (print "Invalid commitment, signing restart")
+                                        (node-compute-cosi node reply-to msg))
+                                       
+                                       (t
+                                        ;; must have been a late arrival
+                                        (wait-signing))
+                                       ))
+                                
+                                (msg
+                                 (unknown-message msg))
+                                )))
+                         (wait-signing))
+                       )) ;; end of big COND clause
+                    
+                    (t
+                     ;; must have been a late arrival
+                     (wait-commitment))
+                    )) ;; end of message pattern
+             
+             (msg
+              (unknown-message msg))
+             )))
+      (wait-commitment))))
 
 #|
 ;; FOR TESTING!!!
@@ -1122,11 +1187,13 @@ Connecting to #$(NODE "10.0.1.6" 65000)
 
 (setf *real-nodes* (list *leader-node*))
 
-(setf *real-nodes* (remove "rambdo" *real-nodes*
-                           :key 'car
+(setf *real-nodes* (remove "10.0.1.13" *real-nodes*
                            :test 'string-equal))
 
 (generate-tree :nel 100)
+
+(reconstruct-tree)
+|#
 
 (defun tst ()
   (spawn
@@ -1143,7 +1210,7 @@ Connecting to #$(NODE "10.0.1.6" 65000)
                            (and sig (list _ _ bits)))))
           (send *dly-instr* :plt)
           (ac:pr
-           (format nil "Total Witnesses: ~D" (logcount (decode-short-bitmap bits)))
+           (format nil "Total Witnesses: ~D" (logcount bits))
            msg
            (format nil "Duration = ~A" (- (get-universal-time) start)))
           
@@ -1164,7 +1231,15 @@ Connecting to #$(NODE "10.0.1.6" 65000)
           (unregister-return-addr ret)
           (error "Huh? ~A" msg))
          )))))
- |#
+
 ;; -------------------------------------------------------------
 
-       
+(defvar *dachshund*  "10.0.1.3")
+(defvar *malachite*  "10.0.1.6")
+(defvar *rambo*      "10.0.1.13")
+
+(defmethod damage ((ip string) t/f)
+  (damage (gethash ip *ip-node-tbl*) t/f))
+
+(defmethod damage ((node node) t/f)
+  (setf (node-byz node) t/f))

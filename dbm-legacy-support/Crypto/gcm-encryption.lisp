@@ -4,7 +4,7 @@
 ;; ---------------------------------------------------------------
 
 (defvar *gcm-cipher-file-encryption*
-  #$(uuid {9E6BCEDE-B91A-11E1-8A87-C82A14446EA7}))
+  #.(uuid:uuid "{9E6BCEDE-B91A-11E1-8A87-C82A14446EA7}"))
 
 (defun gcm-signature ()
   (uuid:uuid-to-byte-array *gcm-cipher-file-encryption*))

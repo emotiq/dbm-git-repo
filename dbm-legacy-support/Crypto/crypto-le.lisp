@@ -30,14 +30,14 @@
   (opad   (:foreign-array :uint8  (64)))
   (is224  :int))
 
-(fli:define-foreign-function (sha2_starts #$(c-name "sha2_starts") :source)
+(fli:define-foreign-function (sha2_starts #.(c-name "sha2_starts") :source)
     ((ctx  (:pointer sha2_context))
      (:constant 0 :int))
   :result-type :void
   :language :ansi-c
   :module :cryptolib)
 
-(fli:define-foreign-function (sha2_update #$(c-name "sha2_update") :source)
+(fli:define-foreign-function (sha2_update #.(c-name "sha2_update") :source)
     ((ctx   (:pointer sha2_context))
      (input (:pointer :uint8))
      (ilen  :int))
@@ -45,14 +45,14 @@
   :language :ansi-c
   :module :cryptolib)
 
-(fli:define-foreign-function (sha2_finish #$(c-name "sha2_finish") :source)
+(fli:define-foreign-function (sha2_finish #.(c-name "sha2_finish") :source)
     ((ctx    (:pointer sha2_context))
      (output (:pointer :uint8))) ;; should point to 32 bytes
   :result-type :void
   :language :ansi-c
   :module :cryptolib)
 
-(fli:define-foreign-function (sha2 #$(c-name "sha2") :source)
+(fli:define-foreign-function (sha2 #.(c-name "sha2") :source)
     ((input  (:pointer :uint8))
      (ilen   :int)
      (output (:pointer :uint8)) ;; should point to 32 bytes
@@ -61,7 +61,7 @@
   :language :ansi-c
   :module :cryptolib)
 
-(fli:define-foreign-function (sha2_file #$(c-name "sha2_file") :source)
+(fli:define-foreign-function (sha2_file #.(c-name "sha2_file") :source)
     ((path   (:reference-pass (:ef-mb-string :limit 256)))
      (output (:pointer :uint8)) ;; should point to 32 bytes
      (:constant 0 :int))
@@ -69,7 +69,7 @@
   :language :ansi-c
   :module   :cryptolib)
 
-(fli:define-foreign-function (shad2_file #$(c-name "shad2_file") :source)
+(fli:define-foreign-function (shad2_file #.(c-name "shad2_file") :source)
     ((path   (:reference-pass (:ef-mb-string :limit 256)))
      (output (:pointer :uint8)) ;; should point to 32 bytes
      (:constant 0 :int))
@@ -77,13 +77,13 @@
   :language :ansi-c
   :module   :cryptolib)
 
-(fli:define-foreign-function (sha2_self_test #$(c-name "sha2_self_test") :source)
+(fli:define-foreign-function (sha2_self_test #.(c-name "sha2_self_test") :source)
     ((verbose :int))
   :result-type :int
   :language :ansi-c
   :module :cryptolib)
 
-(fli:define-foreign-function (sha2-hmac #$(c-name "sha2_hmac") :source)
+(fli:define-foreign-function (sha2-hmac #.(c-name "sha2_hmac") :source)
     ((key    (:pointer :uint8))
      (klen   :int)
      (input  (:pointer :uint8))
@@ -101,7 +101,7 @@
   (rk     (:pointer :uint32))
   (buf    (:foreign-array :uint32 (68))))
 
-(fli:define-foreign-function (aes_setkey_enc #$(c-name "aes_setkey_enc") :source)
+(fli:define-foreign-function (aes_setkey_enc #.(c-name "aes_setkey_enc") :source)
     ((ctx  (:pointer aes_context))
      (key  (:pointer :uint8))
      (keysize :int))
@@ -109,7 +109,7 @@
   :language :ansi-c
   :module :cryptolib)
 
-(fli:define-foreign-function (aes_setkey_dec #$(c-name "aes_setkey_dec") :source)
+(fli:define-foreign-function (aes_setkey_dec #.(c-name "aes_setkey_dec") :source)
     ((ctx  (:pointer aes_context))
      (key  (:pointer :uint8))
      (keysize :int))
@@ -117,7 +117,7 @@
   :language :ansi-c
   :module :cryptolib)
     
-(fli:define-foreign-function (aes_crypt_cbc #$(c-name "aes_crypt_cbc") :source)
+(fli:define-foreign-function (aes_crypt_cbc #.(c-name "aes_crypt_cbc") :source)
     ((ctx     (:pointer aes_context))
      (mode    :int)
      (length  :int)
@@ -128,7 +128,7 @@
   :language :ansi-c
   :module :cryptolib)
     
-(fli:define-foreign-function (aes_self_test #$(c-name "aes_self_test") :source)
+(fli:define-foreign-function (aes_self_test #.(c-name "aes_self_test") :source)
     ((verbose :int))
   :result-type :int
   :language :ansi-c
@@ -141,7 +141,7 @@
   (rk     (:pointer :uint32))
   (buf    (:foreign-array :uint32 (128))))
 
-(fli:define-foreign-function (aesx_setkey_enc #$(c-name "aesx_setkey_enc") :source)
+(fli:define-foreign-function (aesx_setkey_enc #.(c-name "aesx_setkey_enc") :source)
     ((ctx  (:pointer aesx_context))
      (key  (:pointer :uint8))
      (keysize :int))
@@ -149,7 +149,7 @@
   :language :ansi-c
   :module :cryptolib)
 
-(fli:define-foreign-function (aesx_setkey_dec #$(c-name "aesx_setkey_dec") :source)
+(fli:define-foreign-function (aesx_setkey_dec #.(c-name "aesx_setkey_dec") :source)
     ((ctx  (:pointer aesx_context))
      (key  (:pointer :uint8))
      (keysize :int))
@@ -157,7 +157,7 @@
   :language :ansi-c
   :module :cryptolib)
     
-(fli:define-foreign-function (aesx_crypt_cbc #$(c-name "aesx_crypt_cbc") :source)
+(fli:define-foreign-function (aesx_crypt_cbc #.(c-name "aesx_crypt_cbc") :source)
     ((ctx     (:pointer aesx_context))
      (mode    :int)
      (length  :int)
@@ -168,7 +168,7 @@
   :language :ansi-c
   :module :cryptolib)
     
-(fli:define-foreign-function (aesx_self_test #$(c-name "aesx_self_test") :source)
+(fli:define-foreign-function (aesx_self_test #.(c-name "aesx_self_test") :source)
     ((verbose :int))
   :result-type :int
   :language :ansi-c
@@ -282,7 +282,7 @@
 
 ;; ----------------------------------------------------------------
 
-(fli:define-foreign-function (gf128_add #$(c-name "gf128_add") :source)
+(fli:define-foreign-function (gf128_add #.(c-name "gf128_add") :source)
     ((op1   (:pointer :uint8))
      (op2   (:pointer :uint8))
      (opdst (:pointer :uint8)))
@@ -290,7 +290,7 @@
   :language    :ansi-c
   :module      :cryptolib)
   
-(fli:define-foreign-function (gf128_mul #$(c-name "gf128_mul") :source)
+(fli:define-foreign-function (gf128_mul #.(c-name "gf128_mul") :source)
     ((op1   (:pointer :uint8))
      (op2   (:pointer :uint8))
      (opdst (:pointer :uint8)))
@@ -298,7 +298,7 @@
   :language    :ansi-c
   :module      :cryptolib)
   
-(fli:define-foreign-function (gf128_div #$(c-name "gf128_div") :source)
+(fli:define-foreign-function (gf128_div #.(c-name "gf128_div") :source)
     ((op1   (:pointer :uint8))
      (op2   (:pointer :uint8))
      (opdst (:pointer :uint8)))
@@ -306,7 +306,7 @@
   :language    :ansi-c
   :module      :cryptolib)
   
-(fli:define-foreign-function (gf128_inv #$(c-name "gf128_inv") :source)
+(fli:define-foreign-function (gf128_inv #.(c-name "gf128_inv") :source)
     ((op    (:pointer :uint8))
      (opdst (:pointer :uint8)))
   :result-type :void
@@ -390,7 +390,7 @@
 
 ;; ----------------------------------------------------------------
 
-(fli:define-foreign-function (gf571_add #$(c-name "gf571_add") :source)
+(fli:define-foreign-function (gf571_add #.(c-name "gf571_add") :source)
     ((op1   (:pointer :uint8))
      (op2   (:pointer :uint8))
      (opdst (:pointer :uint8)))
@@ -398,7 +398,7 @@
   :language    :ansi-c
   :module      :cryptolib)
   
-(fli:define-foreign-function (gf571_mul #$(c-name "gf571_mul") :source)
+(fli:define-foreign-function (gf571_mul #.(c-name "gf571_mul") :source)
     ((op1   (:pointer :uint8))
      (op2   (:pointer :uint8))
      (opdst (:pointer :uint8)))
@@ -406,7 +406,7 @@
   :language    :ansi-c
   :module      :cryptolib)
   
-(fli:define-foreign-function (gf571_div #$(c-name "gf571_div") :source)
+(fli:define-foreign-function (gf571_div #.(c-name "gf571_div") :source)
     ((op1   (:pointer :uint8))
      (op2   (:pointer :uint8))
      (opdst (:pointer :uint8)))
@@ -414,7 +414,7 @@
   :language    :ansi-c
   :module      :cryptolib)
   
-(fli:define-foreign-function (gf571_inv #$(c-name "gf571_inv") :source)
+(fli:define-foreign-function (gf571_inv #.(c-name "gf571_inv") :source)
     ((op    (:pointer :uint8))
      (opdst (:pointer :uint8)))
   :result-type :void
@@ -507,7 +507,7 @@
 |#
 
 #|
-(fli:define-foreign-function (gf571_integer_length #$(c-name "gf571_integer_length") :source)
+(fli:define-foreign-function (gf571_integer_length #.(c-name "gf571_integer_length") :source)
     ((opnd  (:pointer :uint8)))
   :result-type :int
   :language :ansi-c
@@ -521,7 +521,7 @@
       (gf571_integer_length opnd))))
 |#
 #|
-(fli:define-foreign-function (gf571_shiftl #$(c-name "gf571_shiftl") :source)
+(fli:define-foreign-function (gf571_shiftl #.(c-name "gf571_shiftl") :source)
     ((opnd  (:pointer :uint8))
      (nsh   :int)
      (opdst (:pointer :uint8)))
@@ -539,7 +539,7 @@
       (gf571_shiftl opnd n opnd-dst)
       (convert-cbuf-to-gf571-int opnd-dst))))
 
-(fli:define-foreign-function (gf571_prim #$(c-name "gf571_prim") :source)
+(fli:define-foreign-function (gf571_prim #.(c-name "gf571_prim") :source)
     ((opdst (:pointer :uint8)))
   :result-type :void
   :language    :ansi-c
@@ -552,7 +552,7 @@
       (gf571_prim opnd-dst)
       (convert-cbuf-to-gf571-int opnd-dst))))
 
-(fli:define-foreign-function (gf571_is_one #$(c-name "gf571_is_one") :source)
+(fli:define-foreign-function (gf571_is_one #.(c-name "gf571_is_one") :source)
     ((opnd  (:pointer :uint8)))
   :result-type :int
   :language :ansi-c
@@ -565,7 +565,7 @@
       (convert-gf571-int-to-cbuf x opnd)
       (gf571_is_one opnd))))
 
-(fli:define-foreign-function (gf571_sizeof_opnd #$(c-name "gf571_sizeof_opnd") :source)
+(fli:define-foreign-function (gf571_sizeof_opnd #.(c-name "gf571_sizeof_opnd") :source)
     ()
   :result-type :int
   :language :ansi-c
@@ -574,7 +574,7 @@
 
 ;; -----------------------------------------------------------------------
 
-(fli:define-foreign-function (c_ecc571_setCurve #$(c-name "c_ecc571_setCurve") :source)
+(fli:define-foreign-function (c_ecc571_setCurve #.(c-name "c_ecc571_setCurve") :source)
     ((a   (:pointer :uint8))
      (b   (:pointer :uint8)))
   :result-type :void
@@ -612,7 +612,7 @@
 (editor:setup-indent "with-ecc-lib" 1)
 
 
-(fli:define-foreign-function (c_ecc571_add #$(c-name "c_ecc571_add") :source)
+(fli:define-foreign-function (c_ecc571_add #.(c-name "c_ecc571_add") :source)
     ((x1   (:pointer :uint8))
      (y1   (:pointer :uint8))
      (x2   (:pointer :uint8))
@@ -623,7 +623,7 @@
   :language :ansi-c
   :module :cryptolib)
 
-(fli:define-foreign-function (c_ecc571_sub #$(c-name "c_ecc571_sub") :source)
+(fli:define-foreign-function (c_ecc571_sub #.(c-name "c_ecc571_sub") :source)
     ((x1   (:pointer :uint8))
      (y1   (:pointer :uint8))
      (x2   (:pointer :uint8))
@@ -670,7 +670,7 @@
   (c-ecc571-binop #'c_ecc571_sub apt bpt))
 
 
-(fli:define-foreign-function (c_ecc571_mul #$(c-name "c_ecc571_mul") :source)
+(fli:define-foreign-function (c_ecc571_mul #.(c-name "c_ecc571_mul") :source)
     ((x1   (:pointer :uint8))
      (y1   (:pointer :uint8))
      (n    (:pointer :uint8))

@@ -4,7 +4,7 @@
 ;; ---------------------------------------------------------------
 
 (defvar *ecc-blk-encryption*
-  #$(uuid {F2BD850E-8F25-11E2-8AEA-C82A14446EA7}))
+  #.(uuid:uuid "{F2BD850E-8F25-11E2-8AEA-C82A14446EA7}"))
 
 (defun ecc-blk-signature ()
   (uuid:uuid-to-byte-array *ecc-blk-encryption*))

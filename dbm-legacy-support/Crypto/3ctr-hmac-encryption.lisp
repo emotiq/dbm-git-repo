@@ -4,7 +4,7 @@
 ;; ---------------------------------------------------------------
 
 (defvar *3ctr-hmac-cipher-file-encryption*
-  #$(uuid {82272E0A-B0C1-11E1-9C55-C82A14446EA7}))
+  #.(uuid:uuid "{82272E0A-B0C1-11E1-9C55-C82A14446EA7}"))
 
 (defun 3ctr-hmac-signature ()
   (uuid:uuid-to-byte-array *3ctr-hmac-cipher-file-encryption*))
