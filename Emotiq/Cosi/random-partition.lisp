@@ -766,8 +766,13 @@ Connecting to #$(NODE "10.0.1.6" 65000)
 ;; -----------------------------------------------------
 ;; THE SOCKET INTERFACE...
 ;; -----------------------------------------------------
-#+:LISPWORKS
-(progn
+
+(defvar *cosi-port*         65001)
+(defvar *cosi-server*         nil)
+(defvar *max-buffer-length* 65500)
+
+#+:xLISPWORKS
+(progn ;; TCP/IP stream over Butterfly
   (defun socket-send (ip real-ip msg)
     ;; replace this with USOCKETS protocol
     (let* ((quad     (make-hmac msg
@@ -792,12 +797,28 @@ Connecting to #$(NODE "10.0.1.6" 65000)
             (apply 'send true-dest msg))))
       )))
 
+
+(defun cosi-service-handler (buf)
+  (multiple-value-bind (ans err)
+      (ignore-errors
+        (loenc:decode buf))
+    (unless err
+      (multiple-value-bind (ubv-msg t/f) (verify-hmac ans)
+        (when t/f
+          (destructuring-bind (dest &rest msg) ubv-msg
+            (let ((true-dest (dest-ip dest)))
+              (when true-dest
+                ;; for debug... -------------------
+                (when (eq true-dest (node-self *my-node*))
+                  (pr (format nil "forwarding-to-me: ~A" msg)))
+                ;; ------------------
+                (apply 'send true-dest msg)))
+            ))))
+    ))
+
 #-:LISPWORKS
-(progn
-  (defvar *cosi-port*         65001)
-  (defvar *cosi-server*         nil)
-  (defvar *max-buffer-length* 65500)
-  
+(progn ;; USOCKET interface for ACL
+
   (defun serve-cosi ()
     (let* ((my-ip  (node-real-ip *my-node*))
            (maxbuf (make-array *max-buffer-length*
@@ -814,49 +835,106 @@ Connecting to #$(NODE "10.0.1.6" 65000)
 		(usocket:socket-receive socket maxbuf (length maxbuf))
 	      (declare (ignore rem-ip rem-port))
 	      ;; (pr :sock-read buf-len rem-ip rem-port buf)
-	      (multiple-value-bind (ans err)
-		  (ignore-errors
-		   (loenc:decode buf))
-		(unless err
-		  (multiple-value-bind (ubv-msg t/f) (verify-hmac ans)
-		    (when t/f
-		      (destructuring-bind (dest &rest msg) ubv-msg
-			(let ((true-dest (dest-ip dest)))
-			  (when true-dest
-			    ;; for debug... -------------------
-			    (when (eq true-dest (node-self *my-node*))
-			      (pr (format nil "forwarding-to-me: ~A" msg)))
-			    ;; ------------------
-			    (apply 'send true-dest msg)))
-			))))
-		))))
-      (usocket:socket-close socket)
-      (pr :server-giving-up)
-      (setf *cosi-server* nil)
-      ))
+              (cosi-service-handler buf)))
+        ;; unwinding
+        (usocket:socket-close socket)
+        (pr :server-stopped)
+        (setf *cosi-server* nil)
+        )))
   
   (defun start-server ()
       (setf *cosi-server*
             (mp:process-run-function "UDP Cosi Server"
-                                     'serve-cosi))
-      )
-  
+                                     'serve-cosi)))
+
   (defun shutdown-server ()
     (when *cosi-server*
-      (mp:process-kill *cosi-server*)))
+      (mp:process-kill *cosi-server*)
+      (loop while *cosi-server* do
+            (sleep 1))))
   
   (defun socket-send (ip real-ip msg)
     (let* ((quad     (make-hmac (list* ip msg)
                                 (node-skey *my-node*)
                                 (node-uuid *my-node*)))
            (packet   (loenc:encode quad))
+           (nb       (length packet))
            (socket   (usocket:socket-connect real-ip *cosi-port*
                                              :protocol :datagram)))
       ;; (pr :sock-send (length packet) real-ip packet)
-      (usocket:socket-send socket packet (length packet))
+      (unless (eql nb (usocket:socket-send socket packet nb))
+        (pr :socket-send-error ip msg))
       (usocket:socket-close socket)
       )))
+
+#+:LISPWORKS
+(progn ;; LW UDP Async interface
+  (defvar *udp-wait-collection* nil)
+
+  (defun ensure-udp-wait-state-collection ()
+    (or *udp-wait-collection*
+        (let ((new (comm:create-and-run-wait-state-collection "UDP Cosi Service")))
+        (if (sys:compare-and-swap *udp-wait-collection* nil new)
+            new
+          (progn ; Another process just set it.
+            (comm:wait-state-collection-stop-loop new)
+            *udp-wait-collection*)))))
+
+  ;; -------------------------
+  ;; Server side
   
+  (defun #1=udp-cosi-server-process-request (async-io-state  string bytes-num ip-address port-num)
+    (declare (ignore bytes-num ip-address port-num))
+    (let ((status (comm:async-io-state-read-status async-io-state)))
+      (when status ;; something went wrong
+        (pr (format nil "UDP example server: got error ~s, restarting" status))
+        (comm:close-async-io-state async-io-state)
+        (start-server)
+        (return-from #1#))
+      
+      (udp-cosi-server-receive-next async-io-state)
+      
+      (cosi-service-handler string)))
+  
+  (defun udp-cosi-server-receive-next (async-io-state )
+    (comm:async-io-state-receive-message async-io-state
+                                         (make-array *max-buffer-length*
+                                                     :element-type '(unsigned-byte 8))
+                                         'udp-cosi-server-process-request :needs-address t))
+  
+  (defun start-server ()
+    (let ((async-io-state (comm:create-async-io-state-and-udp-socket 
+                           (ensure-udp-wait-state-collection)
+                           :name "UDP Cosi server socket"
+                           :local-port *cosi-port*)))
+      (udp-cosi-server-receive-next async-io-state)))
+
+  (defun shutdown-server ()
+    nil)
+
+  ;; -----------------
+  ;; Client side
+  
+  (defun internal-udp-cosi-client-send-request (callback ip-address ip-port packet)
+    (let* ((collection     (ensure-udp-wait-state-collection))
+           (async-io-state (comm:create-async-io-state-and-udp-socket collection)))
+      (comm:async-io-state-send-message-to-address async-io-state
+                                                   ip-address
+                                                   ip-port
+                                                   packet
+                                                   callback)
+      async-io-state))
+  
+  (defun socket-send (ip real-ip msg)
+    (let* ((quad     (make-hmac (list* ip msg)
+                                (node-skey *my-node*)
+                                (node-uuid *my-node*)))
+           (packet   (loenc:encode quad)))
+      (internal-udp-cosi-client-send-request 'comm:close-async-io-state
+                                             real-ip *cosi-port* packet)
+      ))
+  )
+
 (defmethod dest-ip ((ip string))
   (let ((node (gethash ip *ip-node-tbl*)))
     (when node
@@ -1336,7 +1414,5 @@ Connecting to #$(NODE "10.0.1.6" 65000)
 
 (defun init-sim ()
   (shutdown-server)
-  (loop while *cosi-server* do
-	(sleep 1))
   (reconstruct-tree)
   (start-server))
