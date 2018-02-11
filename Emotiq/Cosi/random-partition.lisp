@@ -56,7 +56,8 @@
 
 (defvar *local-nodes*  '(("Malachite.local" . "10.0.1.6")
                          ("Dachshund.local" . "10.0.1.3")
-                         ("Rambo"           . "10.0.1.13")))
+                         ("Rambo"           . "10.0.1.13")
+                         ("ChromeKote.local" . "10.0.1.36")))
 
 (defun get-local-ipv4 (node-name)
   (cdr (assoc node-name *local-nodes*
@@ -66,7 +67,8 @@
   (get-local-ipv4 (machine-instance)))
 
 (defvar *real-nodes*  (mapcar 'cdr *local-nodes*))
-(defvar *leader-node* (get-local-ipv4 "Dachshund.local"))
+;(defvar *leader-node* (get-local-ipv4 "Dachshund.local"))
+(defvar *leader-node* (get-local-ipv4 "ChromeKote.local"))
 
 (defvar *top-node*   nil) ;; current leader node
 (defvar *my-node*    nil) ;; which node my machine is on
@@ -210,7 +212,8 @@
 
 (defun integer-to-dotted-string (val)
   #+:LISPWORKS (comm:ip-address-string val)
-  #-:LISPWORKS (allegro-integer-to-dotted val))
+  #+:OPENMCL (CCL::ipaddr-to-dotted val)
+  #+:ALLEGRO (allegro-integer-to-dotted val))
 
 (defun gen-uuid-int ()
   (uuid:uuid-to-integer (uuid:make-v1-uuid)))
@@ -232,20 +235,14 @@
 
 (defun assign-bits ()
   ;; assign bit positions to each node
-  (let ((bit  0))
+  (let ((collected
+         (um:accum acc (maphash (lambda (k node) (declare (ignore k)) (acc node)) *ip-node-tbl*))))
+    (setf collected (sort collected '< :key 'node-uuid))
+    (loop for node in collected
+      for ix from 0 do
+      (setf (node-bit node) ix))
     (setf *node-bit-tbl*
-          (coerce
-           (sort
-            (um:accum acc
-              (maphash (lambda (k node)
-                         (declare (ignore k))
-                         (setf (node-bit node) bit
-                               bit             (1+ bit))
-                         (acc node))
-                       *ip-node-tbl*))
-            '<
-            :key 'node-uuid)
-           'vector))
+          (coerce collected 'vector))
     ))
 
 ;; -------------------------------------------------------------------
@@ -837,7 +834,7 @@ Connecting to #$(NODE "10.0.1.6" 65000)
 	    (multiple-value-bind (buf buf-len rem-ip rem-port)
 		(usocket:socket-receive socket maxbuf (length maxbuf))
 	      (declare (ignore rem-ip rem-port))
-	      ;; (pr :sock-read buf-len rem-ip rem-port buf)
+	      (pr :sock-read buf-len rem-ip rem-port (loenc:decode buf))
               (cosi-service-handler buf)))
         ;; unwinding
         (usocket:socket-close socket)
@@ -847,7 +844,7 @@ Connecting to #$(NODE "10.0.1.6" 65000)
   
   (defun start-server ()
       (setf *cosi-server*
-            (mp:process-run-function "UDP Cosi Server"
+            (mpcompat:process-run-function "UDP Cosi Server" nil
                                      'serve-cosi)))
 
   (defun shutdown-server ()
@@ -864,7 +861,7 @@ Connecting to #$(NODE "10.0.1.6" 65000)
            (nb       (length packet))
            (socket   (usocket:socket-connect real-ip *cosi-port*
                                              :protocol :datagram)))
-      ;; (pr :sock-send (length packet) real-ip packet)
+      ;(pr :sock-send (length packet) real-ip packet)
       (unless (eql nb (usocket:socket-send socket packet nb))
         (pr :socket-send-error ip msg))
       (usocket:socket-close socket)
