@@ -7,7 +7,8 @@
 (in-package :encode-check)
 
 (defun check (pair)
-  (assert (equalp (loenc:encode (car pair)) (cdr pair))))
+  (assert (equalp (loenc:encode (car pair)) (cdr pair)))
+  (assert (equalp (car pair) (loenc:decode (cdr pair)))))
 
 (defun gen-checks (items)
   (loop for item in items collect (cons item (loenc:encode item))))
