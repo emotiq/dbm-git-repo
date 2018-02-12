@@ -1330,12 +1330,16 @@ Connecting to #$(NODE "10.0.1.6" 65000)
                               (recv
                                 ((list :signed seq r)
                                  (cond ((eql seq sess)
-                                        ;; we completed successfully
-                                        (reply reply-to
-                                               (list :signature msg
-                                                     (list c    ;; cosi signature
-                                                           r
-                                                           bits))))
+                                        (let ((sig (list c r bits)))
+                                          (if (node-validate-cosi node msg sig)
+                                              ;; we completed successfully
+                                              (reply reply-to
+                                                     (list :signature msg sig))
+                                            (progn
+                                              ;; bad signature, try again
+                                              (pr "Invalid signature, signing restart")
+                                              (node-compute-cosi node reply-to msg))
+                                            )))
                                        (t
                                         ;; must have been a late arrival
                                         (wait-signing))
@@ -1344,7 +1348,7 @@ Connecting to #$(NODE "10.0.1.6" 65000)
                                 ((list :missing-node seq)
                                  (cond ((eql seq sess)
                                         ;; retry from start
-                                        (print "Witness dropout, signing restart")
+                                        (pr "Witness dropout, signing restart")
                                         (node-compute-cosi node reply-to msg))
                                        (t
                                         ;; must have been a late arrival
@@ -1353,7 +1357,7 @@ Connecting to #$(NODE "10.0.1.6" 65000)
                               
                                 ((list :invalid-commitment seq)
                                  (cond ((eql seq sess)
-                                        (print "Invalid commitment, signing restart")
+                                        (pr "Invalid commitment, signing restart")
                                         (node-compute-cosi node reply-to msg))
                                        
                                        (t

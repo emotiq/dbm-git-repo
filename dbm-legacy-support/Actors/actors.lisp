@@ -155,7 +155,26 @@
                  ;; <-- a message could have arrived here, but would
                  ;; have failed to enqueue the Actor.  So we double
                  ;; check after clearing the busy mark.
-                 (setf (car (actor-busy self)) nil)
+                 ;;
+                 ;; Note that this had been a simple SETF shown
+                 ;; commented out and replaced with CAS:
+                 ;;
+                 ;;   (setf (car (actor-busy self)) nil)
+                 #-:LISPWORKS (CAS (car (actor-busy self)) t nil)
+                 #+:LISPWORKS (progn
+                                (setf (car (actor-busy self)) nil)
+                                (sys:ensure-memory-after-store))
+                 ;;
+                 ;; And while, ostensibly, that nilling SETF
+                 ;; accomplishes an atomic write just like the CAS
+                 ;; operation, there is another benefit to the CAS in
+                 ;; that any and all memory writes will have become
+                 ;; flushed to memory before CAS. Hence, when we query
+                 ;; the mailbox-not-empty-p we will see an accurate
+                 ;; mailbox. Without CAS, some mail could have been
+                 ;; written but not yet flushed to memory, and the
+                 ;; mailbox-not-empty-p could indicate incorrectly.
+                 ;;
                  (when (mailbox-not-empty-p mbox)
                    (add-self-to-ready-queue)))))
       (deposit-message mbox msg)
