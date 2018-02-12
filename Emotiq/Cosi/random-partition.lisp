@@ -634,37 +634,6 @@
 (defun NYI (&rest args)
   (error "Not yet implemented: ~A" args))
 
-;; ----------------------------
-
-(defclass return-addr ()
-  ((ip   :accessor return-addr-ip   ;; the real IPv4 for returns
-         :initarg  :ip)
-   (aid  :accessor return-addr-aid  ;; actor id for returns
-         :initarg  :aid)))
-
-(defvar *aid-tbl*
-  ;; assoc between Actors and AID's
-  #+:LISPWORKS (make-hash-table
-                :weak-kind :value)
-  #+:ALLEGRO   (make-hash-table
-                :values :weak)
-  #+:CLOZURE   (nyi :make-weak-value-hash-table)
-  )
-
-(defmethod unregister-return-addr ((ret return-addr))
-  (remhash (return-addr-aid ret) *aid-tbl*)
-  (become 'do-nothing))
-
-(defmethod make-return-addr ((ipv4 string))
-  ;; can only be called from within an Actor body
-  (let ((aid  (gen-uuid-int))
-        (self (current-actor)))
-    (assert self)
-    (setf (gethash aid *aid-tbl*) self)
-    (make-instance 'return-addr
-                   :ip  ipv4
-                   :aid aid)))
-
 ;; -------------------------------------------------------
 
 (defun make-node-dispatcher (node)
@@ -761,21 +730,60 @@ Connecting to #$(NODE "10.0.1.6" 65000)
 ==> output window
 (:PKEY+ZKP (855676091672863312136583105058123818001884231695959658747310415728976873583 19894104797779289660345137228823739121774277312822467740314566093297448396984 2080524722754689845098528285145820902670538507089109456806581872878115260191))
 |#
+;; ----------------------------
+
+(defvar *cosi-port*         65001)
+
+(defclass return-addr ()
+  ((ip       :accessor return-addr-ip   ;; the real IPv4 for returns
+             :initarg  :ip)
+   (port     :accessor return-addr-port ;; the real IPv4 port for returns
+             :initarg  :port)
+   (aid      :accessor return-addr-aid  ;; actor id for returns
+             :initarg  :aid)))
+
+(defvar *aid-tbl*
+  ;; assoc between Actors and AID's
+  #+:LISPWORKS (make-hash-table
+                :weak-kind :value)
+  #+:ALLEGRO   (make-hash-table
+                :values :weak)
+  #+:CLOZURE   (nyi :make-weak-value-hash-table)
+  )
+
+(defmethod unregister-return-addr ((ret return-addr))
+  (remhash (return-addr-aid ret) *aid-tbl*)
+  (become 'do-nothing))
+
+(defmethod make-return-addr ((ipv4 string) &optional (port *cosi-port*))
+  ;; can only be called from within an Actor body
+  (let ((aid  (gen-uuid-int))
+        (self (current-actor)))
+    (unless self
+      (error "MAKE-RETURN-ADDR can only be performed by an Actor"))
+    (setf (gethash aid *aid-tbl*) self)
+    (make-instance 'return-addr
+                   :ip   ipv4
+                   :port port
+                   :aid  aid)))
+
 ;; -----------------------------------------------------------
 
 (defmethod send ((node node) &rest msg)
   (unless (node-byz node)
-    (socket-send (node-ip node) (node-real-ip node) msg)))
+    (socket-send (node-ip node) (node-real-ip node) *cosi-port* msg)))
 
 (defmethod send ((ref return-addr) &rest msg)
-  (socket-send ref (return-addr-ip ref) msg))
+  (socket-send ref (return-addr-ip ref) (return-addr-port ref) msg))
 
 (defmethod send ((node null) &rest msg)
-  (ac:pr msg)
+  (ac:pr :sent-to-null msg)
   msg)
 
 (defmethod send (dest &rest msg)
   (apply 'ac:send dest msg))
+
+;; -----------------
 
 (defun reply (reply-to &rest msg)
   (apply 'send reply-to :answer msg))
@@ -784,7 +792,6 @@ Connecting to #$(NODE "10.0.1.6" 65000)
 ;; THE SOCKET INTERFACE...
 ;; -----------------------------------------------------
 
-(defvar *cosi-port*         65001)
 (defvar *max-buffer-length* 65500)
 
 (defun cosi-service-handler (buf)
@@ -794,32 +801,32 @@ Connecting to #$(NODE "10.0.1.6" 65000)
     (unless err
       (multiple-value-bind (packet t/f) (verify-hmac ans)
         (when t/f
-          (destructuring-bind (dest &rest msg) packet
-            (if (eql :SHUTDOWN-SERVER (car msg))
-                :SHUTDOWN-SERVER
-              (let ((true-dest (dest-ip dest)))
-                (when true-dest
-                  ;; for debug... -------------------
-                  (when (eq true-dest (node-self *my-node*))
-                    (pr (format nil "forwarding-to-me: ~A" msg)))
-                  ;; ------------------
-                  (apply 'send true-dest msg)
-                  t))
-              ))))
-      )))
+          (destructuring-bind (dest msg-verb &rest msg-args) packet
+            (cond ((eql :SHUTDOWN-SERVER msg-verb)
+                   :SHUTDOWN-SERVER)
+                  (t
+                   (let ((true-dest (dest-ip dest)))
+                     ;; for debug... -------------------
+                     (when (eq true-dest (node-self *my-node*))
+                       (pr (format nil "forwarding-to-me: ~A" (cons msg-verb msg-args))))
+                     ;; ------------------
+                     (apply 'send true-dest msg-verb msg-args)
+                     t))
+                  )))
+        ))))
 
-(defun shutdown-server ()
+(defun shutdown-server (&optional (port *cosi-port*))
   (when *my-node*
     (let ((me (node-ip *my-node*)))
-      (socket-send me me '(:SHUTDOWN-SERVER)))))
+      (socket-send me me port '(:SHUTDOWN-SERVER)))))
 
-(defun socket-send (ip real-ip msg)
+(defun socket-send (ip real-ip real-port msg)
   (let* ((quad     (make-hmac (list* ip msg)
                               (node-skey *my-node*)
                               (node-uuid *my-node*)))
          (packet   (loenc:encode quad))
          (nb       (length packet)))
-    (internal-send-socket real-ip packet nb)))
+    (internal-send-socket real-ip real-port packet nb)))
 
 ;; ------------------------------------------------------------------
 
@@ -832,6 +839,7 @@ Connecting to #$(NODE "10.0.1.6" 65000)
   (gethash (return-addr-aid ret) *aid-tbl*))
 
 ;; ------------------------------------------------------------------
+;; deprecated...
 
 #+:xLISPWORKS
 (progn ;; TCP/IP stream over Butterfly
@@ -864,16 +872,10 @@ Connecting to #$(NODE "10.0.1.6" 65000)
 #-:LISPWORKS
 (progn ;; USOCKET interface for ACL
 
-  (defun #1=serve-cosi ()
-    (let* ((my-ip  (node-real-ip *my-node*))
-           (maxbuf (make-array *max-buffer-length*
-                               :element-type '(unsigned-byte 8)))
-	   (socket (usocket:socket-connect nil nil
-					   :protocol :datagram
-					   :local-host my-ip
-					   :local-port *cosi-port*
-					   )))
-      (pr :server-starting-up)
+  (defun #1=serve-cosi-port (socket)
+    (let ((maxbuf (make-array *max-buffer-length*
+                              :element-type '(unsigned-byte 8))))
+      ;; (pr :server-starting-up)
       (unwind-protect
           (loop
 	    (multiple-value-bind (buf buf-len rem-ip rem-port)
@@ -884,15 +886,25 @@ Connecting to #$(NODE "10.0.1.6" 65000)
                 (return-from #1#))))
         ;; unwinding
         (usocket:socket-close socket)
-        (pr :server-stopped)
+        ;; (pr :server-stopped)
         )))
   
+  (defun start-ephemeral-server (&optional (port 0))
+    (let* ((my-ip  (node-real-ip *my-node*))
+	   (socket (usocket:socket-connect nil nil
+					   :protocol :datagram
+					   :local-host my-ip
+					   :local-port port
+					   )))
+      (mpcompat:process-run-function "UDP Cosi Server" nil
+                                     'serve-cosi-port socket)
+      (usocket:get-local-port socket)))
+       
   (defun start-server ()
-    (mpcompat:process-run-function "UDP Cosi Server" nil
-                                   'serve-cosi))
+    (start-ephemeral-server *cosi-port*))
 
-  (defun internal-send-socket (ip packet nb)
-    (let ((socket (usocket:socket-connect ip *cosi-port*
+  (defun internal-send-socket (ip port packet nb)
+    (let ((socket (usocket:socket-connect ip port
                                           :protocol :datagram)))
       ;(pr :sock-send (length packet) real-ip packet)
       (unless (eql nb (usocket:socket-send socket packet nb))
@@ -937,12 +949,19 @@ Connecting to #$(NODE "10.0.1.6" 65000)
                                                      :element-type '(unsigned-byte 8))
                                          'udp-cosi-server-process-request :needs-address t))
   
-  (defun start-server ()
+  (defun start-ephemeral-server (&optional (port 0))
     (let ((async-io-state (comm:create-async-io-state-and-udp-socket 
                            (ensure-udp-wait-state-collection)
                            :name "UDP Cosi server socket"
-                           :local-port *cosi-port*)))
-      (udp-cosi-server-receive-next async-io-state)))
+                           :local-port port)))
+      (udp-cosi-server-receive-next async-io-state)
+      (multiple-value-bind (ip-addr ip-port)
+          (comm:async-io-state-address async-io-state)
+        (declare (ignore ip-addr))
+        ip-port)))
+      
+  (defun start-server ()
+    (start-ephemeral-server *cosi-port*))
 
   ;; -----------------
   ;; Client side
@@ -957,11 +976,79 @@ Connecting to #$(NODE "10.0.1.6" 65000)
                                                    callback)
       async-io-state))
   
-  (defun internal-send-socket (ip packet nb)
+  (defun internal-send-socket (ip port packet nb)
     (declare (ignore nb))
     (internal-udp-cosi-client-send-request 'comm:close-async-io-state
-                                           ip *cosi-port* packet)
+                                           ip port packet)
     ))
+
+#|
+(defun ptst ()
+  ;; test requesting a public key
+  (spawn
+   (lambda ()
+     (let* ((port (start-ephemeral-server))
+            (ret  (make-return-addr (node-real-ip *my-node*) port)))
+       (labels
+           ((exit ()
+              (become 'do-nothing)
+              (unregister-return-addr ret)
+              (shutdown-server port)))
+         (pr :my-port port)
+         (inspect ret)
+         (send *my-node* :public-key ret)
+         (recv
+           (msg
+            (pr :I-got... msg)
+            (exit))
+           :TIMEOUT 2
+           :ON-TIMEOUT
+           (progn
+             (pr :I-timed-out...)
+             (exit))
+           ))))
+   ))
+
+(defun stst (msg)
+  ;; test getting a signature & verifying it
+  (spawn
+   (lambda ()
+     (let* ((port (start-ephemeral-server))
+            (ret  (make-return-addr (node-real-ip *my-node*) port)))
+       (labels
+           ((exit ()
+              (become 'do-nothing)
+              (unregister-return-addr ret)
+              (shutdown-server port)))
+         (pr :my-port port)
+         (inspect ret)
+         (send *top-node* :cosi ret msg)
+         (recv
+           ((list :answer (and packet
+                               (list :signature xmsg sig)))
+            (pr :I-got... packet)
+            (send *my-node* :validate ret msg sig)
+            (recv
+              (ansv
+               (pr :Validation ansv)
+               (exit))
+              :TIMEOUT 1
+              :ON-TIMEOUT
+              (pr :timed-out-on-signature-verification)
+              (exit)))
+           
+           (xmsg
+            (pr :what!? xmsg)
+            (exit))
+           
+           :TIMEOUT 15
+           :ON-TIMEOUT
+           (progn
+             (pr :I-timed-out...)
+             (exit))
+           ))))
+   ))
+|#         
 
 ;; --------------------------------------------------------------
 
