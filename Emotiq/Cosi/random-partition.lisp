@@ -1335,10 +1335,8 @@ Connecting to #$(NODE "10.0.1.6" 65000)
                                               ;; we completed successfully
                                               (reply reply-to
                                                      (list :signature msg sig))
-                                            (progn
-                                              ;; bad signature, try again
-                                              (pr "Invalid signature, signing restart")
-                                              (node-compute-cosi node reply-to msg))
+                                            ;; bad signature, try again
+                                            (reply reply-to :corrupt-cosi-network)
                                             )))
                                        (t
                                         ;; must have been a late arrival
