@@ -995,7 +995,7 @@ Connecting to #$(NODE "10.0.1.6" 65000)
               (unregister-return-addr ret)
               (shutdown-server port)))
          (pr :my-port port)
-         (inspect ret)
+         #+:LISPWORKS (inspect ret)
          (send *my-node* :public-key ret)
          (recv
            (msg
@@ -1021,7 +1021,7 @@ Connecting to #$(NODE "10.0.1.6" 65000)
               (unregister-return-addr ret)
               (shutdown-server port)))
          (pr :my-port port)
-         (inspect ret)
+         #+:LISPWORKS (inspect ret)
          (send *top-node* :cosi ret msg)
          (recv
            ((list :answer (and packet
