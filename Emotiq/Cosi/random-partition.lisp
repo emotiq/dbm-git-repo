@@ -634,41 +634,37 @@
 (defun NYI (&rest args)
   (error "Not yet implemented: ~A" args))
 
-(defclass node-ref ()
-  ;; Used for sending reply-to's across the network. The NODE-REF will
-  ;; make it across and SEND/FORWARDING understands real/fake
-  ;; distinctions
-  ((real-ip :accessor node-ref-real-ip ;; actual IPv4 address of node
-            :initarg  :real-ip)
-   (ref-ip  :accessor node-ref-ip      ;; dummy fake IPv4 for sim nodes
-            :initarg  :ip)))
-
-(defmethod make-node-ref ((node node))
-  (make-instance 'node-ref
-                 :real-ip  (node-real-ip node)
-                 :ip       (node-ip node)))
-
 ;; ----------------------------
 
 (defclass return-addr ()
-  ((ip   :accessor return-addr-ip  ;; the real IPv4 for returns
+  ((ip   :accessor return-addr-ip   ;; the real IPv4 for returns
          :initarg  :ip)
    (aid  :accessor return-addr-aid  ;; actor id for returns
          :initarg  :aid)))
 
-(defvar *aid-tbl*  (make-hash-table))
+(defvar *aid-tbl*
+  ;; assoc between Actors and AID's
+  #+:LISPWORKS (make-hash-table
+                :weak-kind :value)
+  #+:ALLEGRO   (make-hash-table
+                :values :weak)
+  #+:CLOZURE   (nyi :make-weak-value-hash-table)
+  )
 
 (defmethod unregister-return-addr ((ret return-addr))
   (remhash (return-addr-aid ret) *aid-tbl*)
   (become 'do-nothing))
 
 (defmethod make-return-addr ((ipv4 string))
-  (let ((aid  (gen-uuid-int)))
-    (setf (gethash aid *aid-tbl*) (ac:current-actor))
+  ;; can only be called from within an Actor body
+  (let ((aid  (gen-uuid-int))
+        (self (current-actor)))
+    (assert self)
+    (setf (gethash aid *aid-tbl*) self)
     (make-instance 'return-addr
                    :ip  ipv4
                    :aid aid)))
-   
+
 ;; -------------------------------------------------------
 
 (defun make-node-dispatcher (node)
@@ -729,6 +725,28 @@
         (error "Unknown message: ~A~%Node: ~A" msg (node-ip node)))
      ))
 
+;; ------------------------------------------------------------------
+;; This is here primarily for testing the network. Not really an RPC
+;; call, and results will show in the output browser, not returned to
+;; caller. RPC violates the basic premise of the point-and-shoot
+;; design. Responders are free to ignore, be deaf, or send us garbage
+;; at any time.
+;;
+;; The design of the system is aimed at coexistenc in a Byzantine network.
+;;
+(defun get-public-key (uuid)
+  (let ((node (gethash uuid *uuid-node-tbl*)))
+    (when node
+      (spawn (lambda ()
+               (let ((ret (make-return-addr (node-real-ip *my-node*))))
+                 (send node :public-key ret)
+                 (recv
+                   (msg
+                    (unregister-return-addr ret)
+                    (pr msg))
+                   )))
+             ))))
+
 #|
 (send *top-node* :public-key (make-node-ref *my-node*))
 ==> see results in output window
@@ -746,9 +764,6 @@ Connecting to #$(NODE "10.0.1.6" 65000)
 (defmethod send ((node node) &rest msg)
   (unless (node-byz node)
     (socket-send (node-ip node) (node-real-ip node) msg)))
-
-(defmethod send ((ref node-ref) &rest msg)
-  (socket-send ref (node-ref-ip ref) msg))
 
 (defmethod send ((ref return-addr) &rest msg)
   (socket-send ref (return-addr-ip ref) msg))
@@ -810,9 +825,6 @@ Connecting to #$(NODE "10.0.1.6" 65000)
   (let ((node (gethash ip *ip-node-tbl*)))
     (when node
       (node-self node))))
-
-(defmethod dest-ip ((ref node-ref))
-  (dest-ip (node-ref-ip ref)))
 
 (defmethod dest-ip ((ret return-addr))
   (gethash (return-addr-aid ret) *aid-tbl*))
@@ -1058,33 +1070,36 @@ Connecting to #$(NODE "10.0.1.6" 65000)
                     )
           (ret-addr (make-return-addr my-ip)))
       (send node :commitment ret-addr msg seq-id)
-      (labels ((!dly ()
-                 #+:LISPWORKS
-                 (send *dly-instr* :incr
-                       (/ (- (get-universal-time) start)
-                          timeout)))
-               (wait ()
-                 (recv
-                   ((list* :commit sub-seq ans)
-                    (cond ((eql sub-seq seq-id)
-                           (!dly)
-                           (unregister-return-addr ret-addr)
-                           (=values ans))
-                          (t
-                           (wait))
-                          ))
+      (labels
+          ((!dly ()
+             #+:LISPWORKS
+             (send *dly-instr* :incr
+                   (/ (- (get-universal-time) start)
+                      timeout)))
 
-                   (_
-                    (wait))
-
-                   :TIMEOUT timeout
-                   :ON-TIMEOUT (progn
-                                 (!dly)
-                                 (unregister-return-addr ret-addr)
-                                 (pr (format nil "SubCommitment timeout waiting for ~A" (node-ip node)))
-                                 (=values nil))
-                   )))
-        (wait)))))
+           (=return (val)
+             (!dly)
+             (unregister-return-addr ret-addr)
+             (=values val))
+               
+           (wait ()
+             (recv
+               ((list* :commit sub-seq ans)
+                (if (eql sub-seq seq-id)
+                    (=return ans)
+                  (wait)))
+               
+               (_
+                (wait))
+                 
+               :TIMEOUT timeout
+               :ON-TIMEOUT
+               (progn
+                 (pr (format nil "SubCommitment timeout waiting for ~A" (node-ip node)))
+                 (=return nil))
+               )))
+        (wait))
+      )))
 
 (defun node-cosi-commitment (node reply-to msg seq-id)
   ;;
@@ -1130,44 +1145,45 @@ Connecting to #$(NODE "10.0.1.6" 65000)
                     )
           (ret-addr (make-return-addr my-ip)))
       (send node :signing ret-addr c seq-id)
-      (labels ((!dly ()
+      (labels
+          ((!dly ()
                  #+:LISPWORKS
                  (send *dly-instr* :incr
                        (/ (- (get-universal-time) start)
                           timeout)))
+
+               (=return (val)
+                 (!dly)
+                 (unregister-return-addr ret-addr)
+                 (=values val))
+               
                (wait ()
                  (recv
                    ((list :signed sub-seq ans)
                     (if (eql sub-seq seq-id)
-                        (progn
-                          (!dly)
-                          (unregister-return-addr ret-addr)
-                          (=values ans))
+                        (=return ans)
                       ;; else
                       (wait)))
                    
                    ((list (or :missing-node
                               :invalid-commitment) sub-seq)
                     (if (eql sub-seq seq-id)
-                        (progn
-                          (!dly)
-                          (unregister-return-addr ret-addr)
-                          (=values nil))
+                        (=return nil)
                       ;; else
                       (wait)))
-
+                   
                    (_
                     (wait))
-          
+                   
                    :TIMEOUT timeout
-                   :ON-TIMEOUT (progn
-                                 (!dly)
-                                 (unregister-return-addr ret-addr)
-                                 (pr (format nil "SubSigning timeout waiting for ~A" (node-ip node)))
-                                 (=values nil))
+                   :ON-TIMEOUT
+                   (progn
+                     (pr (format nil "SubSigning timeout waiting for ~A" (node-ip node)))
+                     (=return nil))
                    )))
-        (wait)))))
-    
+        (wait))
+      )))
+  
 (defun node-cosi-signing (node reply-to c seq-id)
   ;;
   ;; Second phase of Cosi:
@@ -1202,83 +1218,6 @@ Connecting to #$(NODE "10.0.1.6" 65000)
       ))
 
 ;; -----------------------------------------------------------
-#|
-(defun try-cosi (my-ip reply-to msg)
-  (let ((ret  (make-return-addr my-ip))
-        (sess (gen-uuid-int)))
-    (send *top-node* :commitment ret msg sess)
-    (labels
-        ((unknown-message (msg)
-           (unregister-return-addr ret)
-           (error "Unknown message: ~A" msg))
-         
-         (wait-commitment ()
-           (recv
-             ((list :commit seq vpt bits)
-              (cond ((eql seq sess)
-                     ;; compute global challenge                         
-                     (let ((c  (hash-pt-msg (ed-decompress-pt vpt) msg)))
-                       (send *top-node* :signing ret c sess)
-                       (labels
-                           ((wait-signing ()
-                              (recv
-                                ((list :signed seq r)
-                                 (cond ((eql seq sess)
-                                        ;; we completed successfully
-                                        (unregister-return-addr ret)
-                                        (reply reply-to
-                                               (list :signature msg
-                                                     (list c    ;; cosi signature
-                                                           r
-                                                           bits))))
-                                       (t
-                                        ;; must have been a late arrival
-                                        (wait-signing))
-                                       ))
-                                
-                                ((list :missing-node seq)
-                                 (cond ((eql seq sess)
-                                        ;; retry from start
-                                        (unregister-return-addr ret)
-                                        (print "Witness dropout, signing restart")
-                                        (try-cosi my-ip reply-to msg))
-                                       (t
-                                        ;; must have been a late arrival
-                                        (wait-signing))
-                                       ))
-                              
-                                ((list :invalid-commitment seq)
-                                 (cond ((eql seq sess)
-                                        (unregister-return-addr ret)
-                                        (print "Invalid commitment, signing restart")
-                                        (try-cosi my-ip reply-to msg))
-                                       
-                                       (t
-                                        ;; must have been a late arrival
-                                        (wait-signing))
-                                       ))
-                                
-                                (msg
-                                 (unknown-message msg))
-                                )))
-                         (wait-signing))
-                       )) ;; end of big COND clause
-                    
-                    (t
-                     ;; must have been a late arrival
-                     (wait-commitment))
-                    )) ;; end of message pattern
-             
-             (msg
-              (unknown-message msg))
-             )))
-      (wait-commitment))))
-
-(defun node-compute-cosi (node reply-to msg)
-  ;; top-level entry for Cosi signature creation
-  ;; assume for now that leader cannot be corrupted...
-  (spawn 'try-cosi (node-real-ip node) reply-to msg))
-|#
 
 (defun node-compute-cosi (node reply-to msg)
   ;; top-level entry for Cosi signature creation
