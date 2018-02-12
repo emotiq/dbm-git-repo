@@ -726,13 +726,15 @@
      ))
 
 ;; ------------------------------------------------------------------
-;; This is here primarily for testing the network. Not really an RPC
-;; call, and results will show in the output browser, not returned to
-;; caller. RPC violates the basic premise of the point-and-shoot
-;; design. Responders are free to ignore, be deaf, or send us garbage
-;; at any time.
+;; GET-PUBLIC-KEY - This is here primarily for testing the network.
+;; Not really an RPC call, and results will show in the output
+;; browser, not returned to caller.
 ;;
-;; The design of the system is aimed at coexistenc in a Byzantine network.
+;; RPC violates the basic premise of the point-and-shoot design.
+;; Responders are free to ignore, be deaf, or send us garbage at any
+;; time.
+;;
+;; The design of the system is aimed at coexistence in a Byzantine network.
 ;;
 (defun get-public-key (uuid)
   (let ((node (gethash uuid *uuid-node-tbl*)))
