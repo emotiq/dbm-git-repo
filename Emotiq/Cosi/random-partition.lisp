@@ -748,7 +748,7 @@ Connecting to #$(NODE "10.0.1.6" 65000)
                 :weak-kind :value)
   #+:ALLEGRO   (make-hash-table
                 :values :weak)
-  #+:CLOZURE   (nyi :make-weak-value-hash-table)
+  #+:CLOZURE   (make-hash-table :weak :value)
   )
 
 (defmethod unregister-return-addr ((ret return-addr))
