@@ -56,10 +56,6 @@
 
 (load "ASDF-Starter.lisp")
 
-
-(setf *print-length* 10)
-(setf *print-level*   3)
-
 ;; To load, generally, now do:
 ;;
 ;;   (asdf :cosi)
