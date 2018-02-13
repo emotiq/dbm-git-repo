@@ -1,3 +1,4 @@
+;;; -*- Mode: LISP; Syntax: COMMON-LISP -*-
 ;; ads.asd -- ASD File for Authenticated Data Structures
 ;;
 ;; DM/Emotiq  01/18
