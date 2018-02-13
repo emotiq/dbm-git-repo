@@ -289,7 +289,8 @@
         (error "Bad value for #f: ~a" numarg))
       `(declare (optimize (speed ,numarg)
                           (safety ,(- 3 numarg))
-                          (float ,(- 3 numarg))))))
+                          #+LISPWORKS (float ,(- 3 numarg))
+                          ))))
   
   (set-dispatch-macro-character #\# #\f '|reader-for-#F|)
 

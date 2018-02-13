@@ -752,7 +752,7 @@ Connecting to #$(NODE "10.0.1.6" 65000)
                 :weak-kind :value)
   #+:ALLEGRO   (make-hash-table
                 :values :weak)
-  #+:CLOZURE   (nyi :make-weak-value-hash-table)
+  #+:CLOZURE   (make-hash-table :weak :value)
   )
 
 (defmethod unregister-return-addr ((ret return-addr))
@@ -912,7 +912,7 @@ Connecting to #$(NODE "10.0.1.6" 65000)
                                           :protocol :datagram)))
       ;(pr :sock-send (length packet) real-ip packet)
       (unless (eql nb (usocket:socket-send socket packet nb))
-        (pr :socket-send-error ip msg))
+        (pr :socket-send-error ip packet))
       (usocket:socket-close socket)
       )))
 
