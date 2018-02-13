@@ -112,6 +112,8 @@
    ;; -------------------------------------
    (real-ip  :accessor node-real-ip  ;; real node for this node
              :initarg  :real-ip)
+   (ok       :accessor node-ok       ;; t if we participated in round 1
+             :initform nil)
    (v        :accessor node-v        ;; first round random seed
              :initform nil)
    (seq      :accessor node-seq      ;; first round ID
@@ -120,8 +122,6 @@
              :initform nil)
    (parts    :accessor node-parts    ;; group participants in first round commitment
              :initform nil)
-   (vs       :accessor node-vs       ;; vpt for each participant
-             :initform nil)
    (bad      :accessor node-bad      ;; if true then node was corrupted
              :initform nil)
    (load     :accessor node-load     ;; cpu loading of group for this node
@@ -129,6 +129,9 @@
    (self     :accessor node-self     ;; ptr to Actor handler
              :initarg  :self)
    ))
+
+(defmethod node-bitmap ((node node))
+  (ash 1 (node-bit node)))
 
 (defmethod iteri-subs ((node node) fn)
   (loop for sub across (node-subs node)
@@ -689,11 +692,15 @@
       (node-cosi-signing node reply-to c c1 seq))
 
      ;; -----------------------------------
+     ;; for sim and debug
      
      (:answer (&rest msg)
       ;; for round-trip testing
       (ac:pr msg))
 
+     (:reset ()
+      (node-reset-nodes node))
+     
      (t (&rest msg)
         (error "Unknown message: ~A~%Node: ~A" msg (node-ip node)))
      ))
@@ -1156,7 +1163,13 @@ Connecting to #$(NODE "10.0.1.6" 65000)
   (setf (node-bad sub) t)
   nil)
 
+;; -----------------------
+
 (defun clear-bad ()
+  (send-real-nodes :reset))
+
+(defun node-reset-nodes (node)
+  (declare (ignore node))
   (loop for node across *node-bit-tbl* do
         (setf (node-bad node) nil)))
 
@@ -1169,6 +1182,10 @@ Connecting to #$(NODE "10.0.1.6" 65000)
 (defun group-subs (node)
   (um:accum acc
     (iter-subs node #'acc)))
+
+(defun send-real-nodes (&rest msg)
+  (loop for ip in *real-nodes* do
+        (apply 'send (gethash ip *ip-node-tbl*) msg)))
 
 ;; -----------------------------------------------------------------------
 
@@ -1214,42 +1231,49 @@ Connecting to #$(NODE "10.0.1.6" 65000)
 (defun node-cosi-commitment (node reply-to msg seq-id)
   ;;
   ;; First phase of Cosi:
-  ;;   Decide if msg warrants a commitment. If so return a fresh
-  ;;   random value from the prime field isomorphic to the EC.
-  ;;   Hold onto that secret seed and return the random EC point.
-  ;;   Otherwise return a null value.
+  ;;   Generate a fresh random ECC pair: (v, v*G)
   ;;
-  ;; We hold that value for the next phase of Cosi.
+  ;;   Decide if msg warrants a commitment. If so add our contribution
+  ;;   to the random challenge, hold on to the secret seed, v. Collect
+  ;;   contributions from group members and add to the random
+  ;;   challenge ECC pt.
   ;;
-  (setf (node-seq   node) seq-id
-        (node-parts node) nil
-        (node-v     node) nil
-        (node-vs    node) nil)
-  (when (msg-ok msg node)
-    (let ((subs   (remove-if 'node-bad (group-subs node)))
-          (bits   (ash 1 (node-bit node)))
-          (vsum   nil))
-      (multiple-value-bind (v vpt) (ed-random-pair)
-        (setf (node-v node) v
-              vsum          vpt)
-        (=bind (lst)
-            (pmapcar (sub-commitment (node-real-ip node) msg seq-id) subs)
-          (labels ((fold-answer (ans sub)
-                     (cond ((null ans)
-                            (pr (format nil "No commitmemt: ~A" (node-ip sub)))
-                            (mark-node-no-response node sub))
-                           (t
-                            (destructuring-bind (sub-ptsum sub-pt sub-bits) ans
-                              (setf bits (logior bits sub-bits)
-                                    vsum (ed-add vsum (ed-decompress-pt sub-ptsum)))
-                              (let ((chk (hash-pt-msg (ed-decompress-pt sub-pt) msg)))
-                                (push (list msg chk) (node-vs node))
-                                (push sub (node-parts node))
-                                )))
-                           )))
-            (mapc #'fold-answer lst subs)
-            (send reply-to :commit seq-id (ed-compress-pt vsum) (ed-compress-pt vpt) bits)
-            ))))))
+  ;;   Compute local validity challenges for all the group members.
+  ;; 
+  ;;   Return both the accumulated random point and our particular
+  ;;   point for use in the local validity challenge.
+  ;;
+  (multiple-value-bind (v vpt) (ed-random-pair)
+    (let* ((subs   (remove-if 'node-bad (group-subs node)))
+           (ok     (msg-ok msg node))
+           (bits   (if ok (node-bitmap node) 0))
+           (vsum   (if ok vpt (ed-neutral-point))))
+      (setf (node-seq   node) seq-id
+            (node-parts node) nil
+            (node-v     node) v
+            (node-ok    node) ok) ;; indicate our participation in phase 1
+      (=bind (lst)
+          (pmapcar (sub-commitment (node-real-ip node) msg seq-id) subs)
+        (labels ((fold-answer (ans sub)
+                   (cond
+                    ((null ans)
+                     (pr (format nil "No commitmemt: ~A" (node-ip sub)))
+                     (mark-node-no-response node sub))
+
+                    (t
+                     (destructuring-bind (sub-ptsum sub-pt sub-bits) ans
+                       ;; fold in the subtree answer
+                       (setf bits (logior bits sub-bits)
+                             vsum (ed-add vsum (ed-decompress-pt sub-ptsum)))
+                       ;; compute a random challenge for node validity checking
+                       (let ((chk (hash-pt-msg (ed-decompress-pt sub-pt) msg)))
+                         ;; accumulate participants for phase 2
+                         (push (list sub msg chk) (node-parts node))
+                         )))
+                    )))
+          (mapc #'fold-answer lst subs)
+          (send reply-to :commit seq-id (ed-compress-pt vsum) (ed-compress-pt vpt) bits)
+          )))))
 
 ;; ------------------------------
 
@@ -1306,51 +1330,61 @@ Connecting to #$(NODE "10.0.1.6" 65000)
   ;;   Given challenge value c, compute the signature value
   ;;     r = v - c * skey.
   ;;   If we decided against signing in the first phase,
-  ;;   then return a null value.
+  ;;   then we shouldn't even be called
   ;;
   (cond
-   ((and (integerp (node-v node))
-         (integerp c)
+   ((and (integerp c)  ;; valid setup for phase 2?
+         (integerp c1)
          (eql seq-id (node-seq node)))
-    (let ((subs    (node-parts node))
-          (chks    (mapcar 'second (node-vs node)))
-          (r       (sub-mod *ed-r* (node-v node)
-                            (mult-mod *ed-r* c (node-skey node))))
-          (r1      (sub-mod *ed-r* (node-v node)
-                            (mult-mod *ed-r* c1 (node-skey node))))
-          (missing nil))
-      (setf (node-v   node) nil
-            (node-seq node) nil)
-      (=bind (r-lst)
-          (pmapcar (sub-signing (node-real-ip node) c seq-id) subs chks)
-        (labels ((fold-answer (sub sub-rs sub-chk)
-                   (cond
-                    ((null sub-rs)
-                     (pr (format nil "No signing: ~A" (node-ip sub)))
-                     (mark-node-no-response node sub)
-                     (setf missing t))
-                    
-                    (t
-                     (destructuring-bind (msg chk) sub-chk
-                       (destructuring-bind (sub-r sub-r1) sub-rs
-                         (if (node-validate-cosi node msg (list chk sub-r1 (ash 1 (node-bit sub))))
-                             (unless missing
-                               (setf r  (add-mod *ed-r* r sub-r)))
-                           (progn
-                             (pr (format nil "Corrupt node: ~A" (node-ip sub)))
-                             (mark-node-corrupted node sub)
-                             (setf missing t))
-                           ))))
-                    )))
-          (mapc #'fold-answer subs r-lst (node-vs node))
-          (if missing
-              (send reply-to :missing-node seq-id)
-            (send reply-to :signed seq-id r r1))
-          ))))
-
-   (t ;; else -- bad state
-      (send reply-to :invalid-commitment seq-id) ;; request restart
-      )))
+    (labels
+        ((compute-signage (challenge)
+           (sub-mod *ed-r* (node-v node)
+                    (mult-mod *ed-r* challenge (node-skey node)))))
+      
+      (let* ((ok      (node-ok node)) ;; did we participate in phase 1?
+             (subs    (mapcar 'first (node-parts node)))
+             (chks    (mapcar 'third (node-parts node)))
+             (rsum    (if ok (compute-signage c) 0))
+             (r1      (compute-signage c1))
+             (missing nil))
+        (setf (node-v   node) nil ;; done with these
+              (node-seq node) nil)
+        (=bind (r-lst)
+            (pmapcar (sub-signing (node-real-ip node) c seq-id) subs chks)
+          (labels ((fold-answer (sub-rs sub-chk)
+                     (destructuring-bind (sub msg chk) sub-chk
+                       (cond
+                        ((null sub-rs)
+                         ;; no response from node, or bad subtree
+                         (pr (format nil "No signing: ~A" sub))
+                         (mark-node-no-response node sub)
+                         (setf missing t))
+                        
+                        (t
+                         (destructuring-bind (sub-r sub-r1) sub-rs
+                           ;; first validate the sub
+                           (if (node-validate-cosi node msg (list chk sub-r1 (node-bitmap sub)))
+                               (unless missing
+                                 ;; sub was ok, but if we had some missing
+                                 ;; subs, don't waste time computing
+                                 ;; anything
+                                 (setf rsum (add-mod *ed-r* rsum sub-r)))
+                             (progn
+                               ;; sub gave a corrupt answer on the local challenge
+                               (pr (format nil "Corrupt node: ~A" (node-ip sub)))
+                               (mark-node-corrupted node sub)
+                               (setf missing t))
+                             )))
+                        ))))
+            (mapc #'fold-answer r-lst (node-parts node))
+            (if missing
+                (send reply-to :missing-node seq-id)
+              (send reply-to :signed seq-id rsum r1))
+            )))))
+   
+   (t ;; else -- bad args
+      (send reply-to :invalid-commitment seq-id)) ;; request restart
+   ))
 
 ;; -----------------------------------------------------------
 

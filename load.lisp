@@ -2,7 +2,27 @@
 
 (in-package :cl-user)
 
-;; NOTE: you MUST have Quicklisp loaded BEFORE loading this file.
+;;;; Quicklisp Setup
+
+;; adapted from quicklisp's lines added by ql:add-to-init-file:
+
+(defparameter *quicklisp-base-pathname* "~/quicklisp/")
+
+(defun quicklisp-set-up-p ()
+  (member ':quicklisp *features*))
+
+(defun set-up-quicklisp ()
+  (let ((p (merge-pathnames "setup.lisp" *quicklisp-base-pathname*)))
+    (when (probe-file p)
+      (format t "~%Loading Quicklisp setup file: ~a ... " p)
+      (load p)
+      (format t "DONE.~%"))))
+
+(defun set-up-quicklisp-if-needed ()
+  (when (not (quicklisp-set-up-p))
+    (set-up-quicklisp)))
+
+(set-up-quicklisp-if-needed)
 
 
 
@@ -22,8 +42,6 @@
   (namestring (determine-repos-pathname))
   "This is pathname of a directory of repositories, i.e., with
   dbm-git-repo/ as a subdirectory.")
-
-(pushnew :com.sd *features*)
 
 (setf (logical-pathname-translations "PROJECTS")
       `(("LIB;**;"             "/usr/local/lib/**/")
@@ -53,24 +71,9 @@
 (setf *default-pathname-defaults* (current-directory))
 
 
-(load "dongle.lisp")
-
-
 (ql:quickload :asdf)
 
 
 (load "ASDF-Starter.lisp")
 
 
-(setf *print-length* 10)
-(setf *print-level*   3)
-
-
-(defun my-start ()
-  (ql:quickload :optima)
-  (ql:quickload :trivia)
-  (ql:quickload :s-base64)
-  (asdf :actors)
-  (asdf :core-crypto)
-  (asdf :ads-clos)
-  (asdf :cosi))

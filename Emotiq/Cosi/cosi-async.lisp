@@ -388,20 +388,21 @@
         (setf data nil))
        (:pltwin (sym)
         (setf pltsym sym))
-       #+:LISPWORKS
        (:plt ()
-        (plt:histogram pltsym data
-                       :clear  t
-                       :ylog   t
-                       :xrange '(0 1.2)
-                       :thick  2
-                       ;; :cum    t
-                       :norm   nil
-                       :title  "Measured Delay Ratios"
-                       :xtitle "Delay-Ratio"
-                       :ytitle "Counts")
-        (plt:plot pltsym '(1 1) '(0.1 1e6)
-                  :color :red))
+       #+:LISPWORKS
+       (progn
+	 (plt:histogram pltsym data
+			:clear  t
+			:ylog   t
+			:xrange '(0 1.2)
+			:thick  2
+			;; :cum    t
+			:norm   nil
+			:title  "Measured Delay Ratios"
+			:xtitle "Delay-Ratio"
+			:ytitle "Counts")
+	 (plt:plot pltsym '(1 1) '(0.1 1e6)
+		   :color :red)))
        ))))
 
 ;; ----------------------------------------------------------------------
