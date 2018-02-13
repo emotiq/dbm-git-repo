@@ -173,15 +173,16 @@
         ))
 |#
 #||#
-(defun mult-mod (m &rest args)
-  (declare (integer m))
+(defun mult-mod (m arg &rest args)
+  (declare (integer m arg))
   (let ((blinder (get-blinder m)))
+    (declare (integer blinder))
     (reduce (lambda (prod x)
               (declare (integer prod x))
               ;; (mult-mod1 m prod x)
-              (mod (* prod (+ x blinder)) m)
-              )
-            args)))
+              (mod (* prod (+ x blinder)) m))
+            args
+            :initial-value (+ arg blinder))))
 
 #|
 (defun split* (m a b)
@@ -230,11 +231,13 @@
             (%mult-mod m prod x))
           args))
 |#
-
+;; ------------------------------------------------------------
+#|
 (defun add-mod (m arg &rest args)
-  (declare (integer m))
+  (declare (integer m arg))
   (if args
       (let ((blinder (get-blinder m)))
+        (declare (integer blinder))
         (reduce (lambda (sum x)
                   (declare (integer sum x))
                   (mod (+ sum (+ x blinder)) m))
@@ -245,6 +248,7 @@
 (defun sub-mod (m arg &rest args)
   (declare (integer m arg))
   (let ((blinder (get-blinder m)))
+    (declare (integer blinder))
     (if args
         (reduce (lambda (diff x)
                   (declare (integer diff x))
@@ -252,7 +256,38 @@
                 args
                 :initial-value (+ arg blinder))
       (mod (- (+ arg blinder)) m))))
+|#
+;; ------------------------------------------------------------
 
+(defun add-mod (m arg &rest args)
+  (declare (integer m arg))
+  (let ((blinder (get-blinder m)))
+    (declare (integer blinder))
+    (mod
+     (if args
+         (reduce (lambda (sum x)
+                   (declare (integer sum x))
+                   (+ sum (+ x blinder)))
+                 args
+                 :initial-value (+ arg blinder))
+       (+ arg blinder))
+     m)))
+
+(defun sub-mod (m arg &rest args)
+  (declare (integer m arg))
+  (let ((blinder (get-blinder m)))
+    (declare (integer blinder))
+    (mod
+     (if args
+         (reduce (lambda (diff x)
+                   (declare (integer diff x))
+                   (- diff (+ x blinder)))
+                 args
+                 :initial-value (+ arg blinder))
+       (- (+ arg blinder)))
+     m)))
+
+;; ------------------------------------------------------------
 #|
 (defun extended-gcd (a b)
   (declare (integer a b))
