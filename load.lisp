@@ -23,8 +23,6 @@
   "This is pathname of a directory of repositories, i.e., with
   dbm-git-repo/ as a subdirectory.")
 
-(pushnew :com.sd *features*)
-
 (setf (logical-pathname-translations "PROJECTS")
       `(("LIB;**;"             "/usr/local/lib/**/")
         ("DYLIB64;**;"         "/usr/local/lib64/**/")
@@ -51,9 +49,6 @@
 (change-directory *projects-lisp-path*)
 
 (setf *default-pathname-defaults* (current-directory))
-
-
-(load "dongle.lisp")
 
 
 (ql:quickload :asdf)
