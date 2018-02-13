@@ -53,3 +53,10 @@
 
 (ql:quickload :asdf)
 
+
+(load "ASDF-Starter.lisp")
+
+;; To load, generally, now do:
+;;
+;;   (asdf :cosi)
+
