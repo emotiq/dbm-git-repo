@@ -65,12 +65,7 @@
 (setf *print-length* 10)
 (setf *print-level*   3)
 
+;; To load, generally, now do:
+;;
+;;   (asdf :cosi)
 
-(defun my-start ()
-  (ql:quickload :optima)
-  (ql:quickload :trivia)
-  (ql:quickload :s-base64)
-  (asdf :actors)
-  (asdf :core-crypto)
-  (asdf :ads-clos)
-  (asdf :cosi))
