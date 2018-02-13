@@ -908,7 +908,7 @@ Connecting to #$(NODE "10.0.1.6" 65000)
                                           :protocol :datagram)))
       ;(pr :sock-send (length packet) real-ip packet)
       (unless (eql nb (usocket:socket-send socket packet nb))
-        (pr :socket-send-error ip msg))
+        (pr :socket-send-error ip packet))
       (usocket:socket-close socket)
       )))
 
