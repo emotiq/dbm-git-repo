@@ -7,12 +7,17 @@ The Emotiq folder contains new code written expressly for the Emotiq blockchain 
 
 ***
 
+Lisp prerequisites and requirements.
+
 Regarding Lisp ports: for the following, ACL and Clozure have been
 tested and work. Lispworks has been partially tested.
 
+It's assume you're loading Quicklisp (https://www.quicklisp.org) via
+your Lisp init file.
+
 ***
 
-Here are som basic load instructions:
+Here are some basic load instructions:
 
 Start Lisp. Then, 
 
