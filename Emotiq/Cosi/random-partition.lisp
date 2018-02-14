@@ -1254,23 +1254,24 @@ Connecting to #$(NODE "10.0.1.6" 65000)
             (node-ok    node) ok) ;; indicate our participation in phase 1
       (=bind (lst)
           (pmapcar (sub-commitment (node-real-ip node) msg seq-id) subs)
-        (labels ((fold-answer (ans sub)
-                   (cond
-                    ((null ans)
-                     (pr (format nil "No commitmemt: ~A" (node-ip sub)))
-                     (mark-node-no-response node sub))
-
-                    (t
-                     (destructuring-bind (sub-ptsum sub-pt sub-bits) ans
-                       ;; fold in the subtree answer
-                       (setf bits (logior bits sub-bits)
-                             vsum (ed-add vsum (ed-decompress-pt sub-ptsum)))
-                       ;; compute a random challenge for node validity checking
-                       (let ((chk (hash-pt-msg (ed-decompress-pt sub-pt) msg)))
-                         ;; accumulate participants for phase 2
-                         (push (list sub msg chk) (node-parts node))
-                         )))
-                    )))
+        (labels
+            ((fold-answer (ans sub)
+               (cond
+                ((null ans)
+                 (pr (format nil "No commitmemt: ~A" (node-ip sub)))
+                 (mark-node-no-response node sub))
+                
+                (t
+                 (destructuring-bind (sub-ptsum sub-pt sub-bits) ans
+                   ;; fold in the subtree answer
+                   (setf bits (logior bits sub-bits)
+                         vsum (ed-add vsum (ed-decompress-pt sub-ptsum)))
+                   ;; compute a random challenge for node validity checking
+                   (let ((chk (hash-pt-msg (ed-decompress-pt sub-pt) msg)))
+                     ;; accumulate participants for phase 2
+                     (push (list sub msg chk) (node-parts node))
+                     )))
+                )))
           (mapc #'fold-answer lst subs)
           (send reply-to :commit seq-id (ed-compress-pt vsum) (ed-compress-pt vpt) bits)
           )))))
@@ -1351,31 +1352,32 @@ Connecting to #$(NODE "10.0.1.6" 65000)
               (node-seq node) nil)
         (=bind (r-lst)
             (pmapcar (sub-signing (node-real-ip node) c seq-id) subs chks)
-          (labels ((fold-answer (sub-rs sub-chk)
-                     (destructuring-bind (sub msg chk) sub-chk
-                       (cond
-                        ((null sub-rs)
-                         ;; no response from node, or bad subtree
-                         (pr (format nil "No signing: ~A" sub))
-                         (mark-node-no-response node sub)
-                         (setf missing t))
-                        
-                        (t
-                         (destructuring-bind (sub-r sub-r1) sub-rs
-                           ;; first validate the sub
-                           (if (node-validate-cosi node msg (list chk sub-r1 (node-bitmap sub)))
-                               (unless missing
-                                 ;; sub was ok, but if we had some missing
-                                 ;; subs, don't waste time computing
-                                 ;; anything
-                                 (setf rsum (add-mod *ed-r* rsum sub-r)))
-                             (progn
-                               ;; sub gave a corrupt answer on the local challenge
-                               (pr (format nil "Corrupt node: ~A" (node-ip sub)))
-                               (mark-node-corrupted node sub)
-                               (setf missing t))
-                             )))
-                        ))))
+          (labels
+              ((fold-answer (sub-rs sub-chk)
+                 (destructuring-bind (sub msg chk) sub-chk
+                   (cond
+                    ((null sub-rs)
+                     ;; no response from node, or bad subtree
+                     (pr (format nil "No signing: ~A" sub))
+                     (mark-node-no-response node sub)
+                     (setf missing t))
+                    
+                    (t
+                     (destructuring-bind (sub-r sub-r1) sub-rs
+                       ;; first validate the sub
+                       (if (node-validate-cosi node msg (list chk sub-r1 (node-bitmap sub)))
+                           (unless missing
+                             ;; sub was ok, but if we had some missing
+                             ;; subs, don't waste time computing
+                             ;; anything
+                             (setf rsum (add-mod *ed-r* rsum sub-r)))
+                         (progn
+                           ;; sub gave a corrupt answer on the local challenge
+                           (pr (format nil "Corrupt node: ~A" (node-ip sub)))
+                           (mark-node-corrupted node sub)
+                           (setf missing t))
+                         )))
+                    ))))
             (mapc #'fold-answer r-lst (node-parts node))
             (if missing
                 (send reply-to :missing-node seq-id)
@@ -1401,62 +1403,68 @@ Connecting to #$(NODE "10.0.1.6" 65000)
          (wait-commitment ()
            (recv
              ((list :commit seq vpt vsubpt bits)
-              (cond ((eql seq sess)
-                     ;; compute global challenge                         
-                     (let ((c  (hash-pt-msg (ed-decompress-pt vpt)    msg))
-                           (c1 (hash-pt-msg (ed-decompress-pt vsubpt) msg)))
-                       (ac:self-call :signing self c c1 sess)
-                       (labels
-                           ((wait-signing ()
-                              (recv
-                                ((list :signed seq r r1)
-                                 (declare (ignore r1))
-                                 (cond ((eql seq sess)
-                                        (let ((sig (list c r bits)))
-                                          (if (node-validate-cosi node msg sig)
-                                              ;; we completed successfully
-                                              (reply reply-to
-                                                     (list :signature msg sig))
-                                            ;; bad signature, try again
-                                            (reply reply-to :corrupt-cosi-network)
-                                            )))
-                                       (t
-                                        ;; must have been a late arrival
-                                        (wait-signing))
-                                       ))
+              (cond
+               ((eql seq sess)
+                ;; compute global challenge                         
+                (let ((c  (hash-pt-msg (ed-decompress-pt vpt)    msg))
+                      (c1 (hash-pt-msg (ed-decompress-pt vsubpt) msg)))
+                  (ac:self-call :signing self c c1 sess)
+                  (labels
+                      ((wait-signing ()
+                         (recv
+                           ((list :signed seq r r1)
+                            (declare (ignore r1))
+                            (cond
+                             ((eql seq sess)
+                              (let ((sig (list c r bits)))
+                                (if (node-validate-cosi node msg sig)
+                                    ;; we completed successfully
+                                    (reply reply-to
+                                           (list :signature msg sig))
+                                  ;; bad signature, try again
+                                  (reply reply-to :corrupt-cosi-network)
+                                  )))
+
+                             (t ;; seq mismatch
+                              ;; must have been a late arrival
+                              (wait-signing))
+                             ))
                                 
-                                ((list :missing-node seq)
-                                 (cond ((eql seq sess)
-                                        ;; retry from start
-                                        (pr "Witness dropout, signing restart")
-                                        (node-compute-cosi node reply-to msg))
-                                       (t
-                                        ;; must have been a late arrival
-                                        (wait-signing))
-                                       ))
-                              
-                                ((list :invalid-commitment seq)
-                                 (cond ((eql seq sess)
-                                        (pr "Invalid commitment, signing restart")
-                                        (node-compute-cosi node reply-to msg))
-                                       
-                                       (t
-                                        ;; must have been a late arrival
-                                        (wait-signing))
-                                       ))
-                                
-                                (msg
-                                 (unknown-message msg))
-                                )))
-                         (wait-signing))
-                       )) ;; end of big COND clause
-                    
-                    (t
-                     ;; must have been a late arrival
-                     (wait-commitment))
-                    )) ;; end of message pattern
-             
-             (msg
+                           ((list :missing-node seq)
+                            (cond
+                             ((eql seq sess)
+                              ;; retry from start
+                              (pr "Witness dropout, signing restart")
+                              (node-compute-cosi node reply-to msg))
+
+                             (t ;; seq mismatch
+                              ;; must have been a late arrival
+                              (wait-signing))
+                             ))
+                           
+                           ((list :invalid-commitment seq)
+                            (cond
+                             ((eql seq sess)
+                              (pr "Invalid commitment, signing restart")
+                              (node-compute-cosi node reply-to msg))
+                             
+                             (t ;; seq mismatch
+                              ;; must have been a late arrival
+                              (wait-signing))
+                             ))
+                           
+                           (msg ;; other messages during signing phase
+                            (unknown-message msg))
+                           )))
+                    (wait-signing))
+                  )) ;; end of big COND clause
+               ;; ------------------------------------
+               (t ;; seq mismatch
+                ;; must have been a late arrival
+                (wait-commitment))
+               )) ;; end of message pattern
+             ;; ---------------------------------
+             (msg ;; other messages during commitment phase
               (unknown-message msg))
              )))
       (wait-commitment))))

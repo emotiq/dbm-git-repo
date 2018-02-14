@@ -175,14 +175,12 @@
 #||#
 (defun mult-mod (m arg &rest args)
   (declare (integer m arg))
-  (let ((blinder (get-blinder m)))
+  (let* ((blinder (get-blinder m)))
     (declare (integer blinder))
-    (reduce (lambda (prod x)
-              (declare (integer prod x))
-              ;; (mult-mod1 m prod x)
-              (mod (* prod (+ x blinder)) m))
-            args
-            :initial-value (+ arg blinder))))
+    (dolist (opnd args arg)
+      (declare (integer opnd))
+      (setf arg (mod (* arg (+ opnd blinder)) m)))
+    ))
 
 #|
 (defun split* (m a b)
@@ -258,7 +256,7 @@
       (mod (- (+ arg blinder)) m))))
 |#
 ;; ------------------------------------------------------------
-
+#|
 (defun add-mod (m arg &rest args)
   (declare (integer m arg))
   (let ((blinder (get-blinder m)))
@@ -286,6 +284,29 @@
                  :initial-value (+ arg blinder))
        (- (+ arg blinder)))
      m)))
+|#
+
+(defun add-mod (m arg &rest args)
+  (declare (integer m arg))
+  (let* ((blinder (get-blinder m))
+         (ans     (+ arg blinder)))
+    (declare (integer blinder ans))
+    (dolist (opnd args)
+      (declare (integer opnd))
+      (incf ans (+ opnd blinder)))
+    (mod ans m)))
+
+(defun sub-mod (m arg &rest args)
+  (declare (integer m arg))
+  (let* ((blinder (get-blinder m))
+         (ans     (- arg blinder)))
+    (declare (integer blinder ans))
+    (if args
+        (dolist (opnd args)
+          (declare (integer opnd))
+          (decf ans (+ opnd blinder)))
+      (setf ans (- ans)))
+    (mod ans m)))
 
 ;; ------------------------------------------------------------
 #|
@@ -329,13 +350,10 @@
 
 (defun div-mod (m arg &rest args)
   (declare (integer m arg))
-  (if args
-      (reduce (lambda (quot dvsr)
-                (declare (integer quot dvsr))
-                (mult-mod m quot (inv-mod m dvsr)))
-              args
-              :initial-value arg)
-    (inv-mod m arg)))
+  (dolist (opnd args
+                (if args arg (inv-mod m arg)))
+    (declare (integer opnd))
+    (setf arg (mult-mod m arg (inv-mod m opnd)))))
 
 #|
 (defvar *mrs-cs*

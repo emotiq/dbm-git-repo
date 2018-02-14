@@ -17,7 +17,10 @@
 		;; (:file "cosi")
 		;; (:file "tst-cas")
                 ;; (:file "cosi-socket")
-                (:file :random-partition)
+                (:file :cosi-construction)
+                (:file :cosi-sockets)
+                (:file :cosi-handlers)
+                ;; (:file :random-partition)
                 )
   :SERIAL T
   :depends-on   (:ironclad
