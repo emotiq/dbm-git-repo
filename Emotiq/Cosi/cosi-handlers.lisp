@@ -2,6 +2,30 @@
 ;;
 ;; DM/Emotiq  02/18
 ;; ---------------------------------------------------------------
+#|
+The MIT License
+
+Copyright (c) 2018 Emotiq AG
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+|#
+
 (in-package :cosi-simgen)
 ;; ---------------------------------------------------------------
 
@@ -9,23 +33,6 @@
   (error "Not yet implemented: ~A" args))
 
 ;; -------------------------------------------------------
-
-(defun make-node-dispatcher (node)
-  ;; use indirection to node-dispatcher for while we are debugging and
-  ;; extending the dispatcher. Saves reconstructing the tree every
-  ;; time the dispatching chanages.
-  (ac:make-actor
-   ;; one of these closures is stored in the SELF slot of every node
-   (lambda (&rest msg)
-     (apply 'node-dispatcher node msg))))
-
-(defun crash-recovery ()
-  ;; just in case we need to re-make the Actors for the network
-  (maphash (lambda (k node)
-             (declare (ignore k))
-             (setf (node-self node) (make-node-dispatcher node)))
-           *ip-node-tbl*))
-
 
 (defun node-dispatcher (node &rest msg)
    (um:dcase msg
@@ -72,6 +79,25 @@
      (t (&rest msg)
         (error "Unknown message: ~A~%Node: ~A" msg (node-ip node)))
      ))
+
+;; -------------------------------------------------------
+
+(defun make-node-dispatcher (node)
+  ;; use indirection to node-dispatcher for while we are debugging and
+  ;; extending the dispatcher. Saves reconstructing the tree every
+  ;; time the dispatching chanages.
+  (ac:make-actor
+   ;; one of these closures is stored in the SELF slot of every node
+   (lambda (&rest msg)
+     (apply 'node-dispatcher node msg))))
+
+(defun crash-recovery ()
+  ;; just in case we need to re-make the Actors for the network
+  (maphash (lambda (k node)
+             (declare (ignore k))
+             (setf (node-self node) (make-node-dispatcher node)))
+           *ip-node-tbl*))
+
 
 ;; -------------------------------------------------------
 ;; New leader node election... tree rearrangement
@@ -229,45 +255,47 @@ Connecting to #$(NODE "10.0.1.6" 65000)
   ;; test requesting a public key
   (spawn
    (lambda ()
-     (let* ((port (start-ephemeral-server))
-            (ret  (make-return-addr (node-real-ip *my-node*) port)))
-       (labels
-           ((exit ()
-              (become 'do-nothing)
-              (unregister-return-addr ret)
-              (shutdown-server port)))
-         (pr :my-port port)
-         #+:LISPWORKS (inspect ret)
-         (send *my-node* :public-key ret)
-         (recv
-           (msg
-            (pr :I-got... msg)
-            (exit))
-           :TIMEOUT 2
-           :ON-TIMEOUT
-           (progn
-             (pr :I-timed-out...)
-             (exit))
-           ))))
+     (let* ((my-ip    (node-real-ip *my-node*))
+            (my-port  (start-ephemeral-server))
+            (ret      (make-return-addr my-ip my-port)))
+         (labels
+             ((exit ()
+                (become 'do-nothing)
+                (unregister-return-addr ret)
+                (shutdown-server my-port)))
+           (pr :my-port my-port)
+           #+:LISPWORKS (inspect ret)
+           (send *my-node* :public-key ret)
+           (recv
+             (msg
+              (pr :I-got... msg)
+              (exit))
+             :TIMEOUT 2
+             :ON-TIMEOUT
+             (progn
+               (pr :I-timed-out...)
+               (exit))
+             ))))
    ))
 
 (defun stst (msg)
   ;; test getting a signature & verifying it
   (spawn
    (lambda ()
-     (let* ((port (start-ephemeral-server))
-            (ret  (make-return-addr (node-real-ip *my-node*) port)))
+     (let* ((my-ip    (node-real-ip *my-node*))
+            (my-port  (start-ephemeral-server))
+            (ret      (make-return-addr my-ip my-port)))
        (labels
            ((exit ()
               (become 'do-nothing)
               (unregister-return-addr ret)
-              (shutdown-server port)))
-         (pr :my-port port)
+              (shutdown-server my-port)))
+         (pr :my-port my-port)
          #+:LISPWORKS (inspect ret)
          (send *top-node* :cosi ret msg)
          (recv
            ((list :answer (and packet
-                               (list :signature xmsg sig)))
+                               (list :signature _ sig)))
             (pr :I-got... packet)
             (pr (format nil "Witnesses: ~A" (logcount (um:last1 sig))))
             (send *my-node* :validate ret msg sig)
@@ -324,6 +352,9 @@ Connecting to #$(NODE "10.0.1.6" 65000)
 
 #+:LISPWORKS
 (defparameter *dly-instr*
+  ;; Very useful for timeout tuning. If timeouts are properly set,
+  ;; then histogram will be entirely to left of red 1.0 Ratio, but not
+  ;; too far left
   (ac:make-actor
    (let ((data   nil)
          (pltsym :plt))
