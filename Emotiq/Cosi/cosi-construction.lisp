@@ -99,8 +99,6 @@
              :initarg  :skey)
    (pkey     :accessor node-pkey     ;; cached ECC point for public key
              :initarg  :pkey)
-   (realnode :accessor node-realnode ;; t/f - t when this is a real IPv4 node, nil for fake
-             :initform nil)
    (parent   :accessor node-parent   ;; points to node of group parent
              :initarg  :parent
              :initform nil)
@@ -132,6 +130,9 @@
 
 (defmethod node-bitmap ((node node))
   (ash 1 (node-bit node)))
+
+(defmethod node-realnode ((node node))
+  (string-equal (node-ip node) (node-real-ip node)))
 
 (defmethod iteri-subs ((node node) fn)
   (loop for sub across (node-subs node)
@@ -238,16 +239,23 @@
 
 ;; -------------------------------------------------------------
 
+;; the *NODE-BIT-TBL* is really an ordered vector of all nodes in the
+;; tree, ordered by UUID magnitude
+
 (defvar *node-bit-tbl* #())
 
 (defun assign-bits ()
   ;; assign bit positions to each node
   (let ((collected
-         (um:accum acc (maphash (lambda (k node) (declare (ignore k)) (acc node)) *ip-node-tbl*))))
+         (um:accum acc
+           (maphash (lambda (k node)
+                      (declare (ignore k))
+                      (acc node))
+                    *ip-node-tbl*))))
     (setf collected (sort collected '< :key 'node-uuid))
     (loop for node in collected
-      for ix from 0 do
-      (setf (node-bit node) ix))
+          for ix from 0 do
+          (setf (node-bit node) ix))
     (setf *node-bit-tbl*
           (coerce collected 'vector))
     ))
@@ -368,10 +376,6 @@
          (main-tree (find leader trees
                           :test 'string=
                           :key  'node-ip)))
-    ;; mark the real nodes as special
-    (mapc (lambda (tree)
-            (setf (node-realnode tree) t))
-          trees)
     ;; attach the non-leader real nodes to the leader node
     (let ((all-but (remove main-tree trees)))
       (setf (node-subs main-tree) (concatenate 'vector

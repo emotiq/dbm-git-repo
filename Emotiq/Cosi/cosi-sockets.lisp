@@ -1,5 +1,15 @@
 ;; cosi-sockets.lisp -- Socket interface for Cosi network
 ;;
+;; We use UDP point-and-shoot protocol among tree nodes.
+;;
+;; For those relatively few instances where a response is expected,
+;; the Actor awaiting a response sets up an ephemeral server on some
+;; unused port to use as the return channel.
+;;
+;; Since all inter-node communications is done with UDP messaging,
+;; nodes can reside anywhere in the network, including from multiple
+;; processes on the same host.
+;;
 ;; DM/Emotiq  02/18
 ;; ------------------------------------------------------------
 
@@ -8,6 +18,12 @@
 ;; ----------------------------
 
 (defvar *cosi-port*         65001)
+
+;; ----------------------------
+;; AID/Actor Associations for network portable Actor references
+;;
+;; NOTE: No assumptions on SMP safety of hash table GETHASH,
+;;  (SETF GETHASH), and REMHASH
 
 (defclass return-addr ()
   ((ip       :accessor return-addr-ip   ;; the real IPv4 for returns
@@ -26,20 +42,35 @@
   #+:CLOZURE   (make-hash-table :weak :value)
   )
 
+(um:defmonitor
+    ((associate-aid-with-actor (aid actor)
+       (setf (gethash aid *aid-tbl*) actor))
+     
+     (lookup-actor-for-aid (aid)
+       (gethash aid *aid-tbl*))
+     
+     (unregister-aid (aid)
+       (remhash aid *aid-tbl*))
+     ))
+
 (defmethod make-return-addr ((ipv4 string) &optional (port *cosi-port*))
-  ;; can only be called from within an Actor body
+  ;; can only be called from within an Actor body. Create a unique AID
+  ;; and associate that with the calling Actor for use with received
+  ;; messages directed at the Actor. Also construct and return a
+  ;; return-addr object, which can be used as a network portable
+  ;; reply-to tag.
   (let ((aid  (gen-uuid-int))
         (self (current-actor)))
     (unless self
-      (error "MAKE-RETURN-ADDR can only be performed by an Actor"))
-    (setf (gethash aid *aid-tbl*) self)
+      (error "MAKE-RETURN-ADDR can only be called by an Actor"))
+    (associate-aid-with-actor aid self)
     (make-instance 'return-addr
                    :ip   ipv4
                    :port port
                    :aid  aid)))
 
 (defmethod unregister-return-addr ((ret return-addr))
-  (remhash (return-addr-aid ret) *aid-tbl*))
+  (unregister-aid (return-addr-aid ret)))
 
 ;; -----------------------------------------------------------
 
@@ -126,9 +157,8 @@
   (let* ((quad     (make-hmac (list* ip msg)
                               (node-skey *my-node*)
                               (node-uuid *my-node*)))
-         (packet   (loenc:encode quad))
-         (nb       (length packet)))
-    (internal-send-socket real-ip real-port packet nb)))
+         (packet   (loenc:encode quad)))
+    (internal-send-socket real-ip real-port packet)))
 
 ;; ------------------------------------------------------------------
 
@@ -138,13 +168,15 @@
       (node-self node))))
 
 (defmethod dest-ip ((ret return-addr))
-  (gethash (return-addr-aid ret) *aid-tbl*))
+  (lookup-actor-for-aid (return-addr-aid ret)))
 
 ;; ------------------------------------------------------------------
-;; deprecated...
+;; deprecated TCP/IP over Butterfly...
 
 #+:xLISPWORKS
 (progn ;; TCP/IP stream over Butterfly
+  ;; ------------------
+  ;; Client side
   (defun socket-send (ip real-ip msg)
     ;; replace this with USOCKETS protocol
     (let* ((quad     (make-hmac msg
@@ -154,6 +186,9 @@
       ;; (format t "~%SOCKET-SEND: ~A ~A ~A" ip real-ip msg)
       #+:LISPWORKS
       (bfly:! agent-ip `(forwarding ,ip ',quad))))
+
+  ;; -------------
+  ;; Server side
   
   (defun forwarding (dest quad)
     ;; (format t "~%FORWARDING: ~A ~A" dest quad)
@@ -170,10 +205,14 @@
       )))
 
 ;; ------------------------------------------------------------------
+;; USOCKET UDP interface
 
 #-:LISPWORKS
 (progn ;; USOCKET interface for ACL
 
+  ;; -------------------
+  ;; Server side
+  
   (defun #1=serve-cosi-port (socket)
     (let ((maxbuf (make-array *max-buffer-length*
                               :element-type '(unsigned-byte 8))))
@@ -205,16 +244,23 @@
   (defun start-server ()
     (start-ephemeral-server *cosi-port*))
 
-  (defun internal-send-socket (ip port packet nb)
-    (let ((socket (usocket:socket-connect ip port
-                                          :protocol :datagram)))
-      ;(pr :sock-send (length packet) real-ip packet)
-      (unless (eql nb (usocket:socket-send socket packet nb))
-        (pr :socket-send-error ip packet))
-      (usocket:socket-close socket)
-      )))
+  ;; -------------
+  ;; Client side
+  
+  (defun internal-send-socket (ip port packet)
+    (let ((nb (length packet)))
+      (when (> nb *max-buffer-length*)
+        (error "Packet too large for UDP transmission"))
+      (let ((socket (usocket:socket-connect ip port
+                                            :protocol :datagram)))
+        ;; (pr :sock-send (length packet) real-ip packet)
+        (unless (eql nb (usocket:socket-send socket packet nb))
+          (pr :socket-send-error ip packet))
+        (usocket:socket-close socket)
+        ))))
 
 ;; ------------------------------------------------------------------
+;; LW UDP Interface
 
 #+:LISPWORKS
 (progn ;; LW UDP Async interface
@@ -225,7 +271,7 @@
         (let ((new (comm:create-and-run-wait-state-collection "UDP Cosi Service")))
         (if (sys:compare-and-swap *udp-wait-collection* nil new)
             new
-          (progn ; Another process just set it.
+          (progn ;; Another process just set it.
             (comm:wait-state-collection-stop-loop new)
             *udp-wait-collection*)))))
 
@@ -278,9 +324,11 @@
                                                    callback)
       async-io-state))
   
-  (defun internal-send-socket (ip port packet nb)
-    (declare (ignore nb))
-    (internal-udp-cosi-client-send-request 'comm:close-async-io-state
-                                           ip port packet)
-    ))
+  (defun internal-send-socket (ip port packet)
+    (let ((nb (length packet)))
+      (when (> nb *max-buffer-length*)
+        (error "Packet too large for UDP transmission"))
+      (internal-udp-cosi-client-send-request 'comm:close-async-io-state
+                                             ip port packet)
+      )))
 

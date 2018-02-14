@@ -147,7 +147,6 @@
         ;; else
         (let ((new-node (make-node ipstr uuid pkeyzkp node)))
           (setf (node-real-ip new-node)  ipstr
-                (node-realnode new-node) t
                 (node-skey new-node)     nil
                 (aref bins ix)           new-node)
           (incf (node-load node))
@@ -165,7 +164,6 @@
               (setf (node-uuid new-node)     uuid
                     (node-pkeyzkp new-node)  pkeyzkp
                     (node-pkey new-node)     pkey ;; cache the decompressed key
-                    (node-realnode new-node) t
                     (node-real-ip new-node)  ipstr)))
         ;; else - not already present
         (node-model-insert-node *top-node* new-node-info))))
@@ -615,8 +613,7 @@ Connecting to #$(NODE "10.0.1.6" 65000)
                   (labels
                       ((wait-signing ()
                          (recv
-                           ((list :signed seq r r1)
-                            (declare (ignore r1))
+                           ((list :signed seq r _)
                             (cond
                              ((eql seq sess)
                               (let ((sig (list c r bits)))
