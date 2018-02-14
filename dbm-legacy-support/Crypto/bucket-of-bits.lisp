@@ -1,4 +1,27 @@
 ;; 512-bit Safe Primes: Q = 2*P+1, P prime
+#|
+The MIT License
+
+Copyright (c) 2017-2018 Refined Audiometrics Laboratory, LLC
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+|#
 
 #x8062F47575D932067BEF9A5AC5497817743FB515A4F419BCB732BF04C64BFE908326FD08A6A7E16E2254051C32E12E02E118F4D6E10EA99EE1DB85F2DF9BA7CF
 #x8112CC1D84F1FAFD50494D9B2BB3FFDD15CC8A9F135A17FDDA352038A612FE8C836C17B461A348EE1C420724F50414EE3EDFB9C0934977BB5EE512760B34FE3B
