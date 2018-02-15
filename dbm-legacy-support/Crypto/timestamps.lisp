@@ -3,6 +3,29 @@
 ;;
 ;; DM/RAL  07/15
 ;; -------------------------------------------------------------------
+#|
+The MIT License
+
+Copyright (c) 2017-2018 Refined Audiometrics Laboratory, LLC
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+|#
 
 (in-package :ecc-crypto-b571)
 
@@ -3052,6 +3075,44 @@
 
 {\"tx_hash\":\"c428c7960df93d59d0ca4178000561df5c8bef727f969e43dcf0d7ea45a82bcf\",
 \"recipient\":\"19mPk8uaMmMXfsDDxdTPG1PXLWun2pHPaK\",
+\"status\":1,
+\"created_at\":\"2015-07-10T00:00:58.275Z\",
+\"updated_at\":\"2015-07-10T04:11:23.760Z\",
+\"private_key\":\"91a00440ee07a06e1e28f070ec97f165cdd5066ab1c97ff38a48ac95a3e2baea\",
+\"public_key\":\"03a2d0121dd45ab8a2b0bec0ae8c1fdad78ccf3f3c7894c9e9ea17e48ccceed6c8\"},
+
+{\"tx_hash\":\"de4f6c1f419c02b72d7ace7543193c35ab0733cf2aadccdbb8284543ee619ed4\",
+\"recipient\":\"1GinZ15SfJHyLg62KrX615GykUC4ZaV8hp\",
+\"status\":0,
+\"created_at\":\"2015-07-11T00:00:37.720Z\",
+\"updated_at\":\"2015-07-11T00:00:38.774Z\",
+\"private_key\":\"8dbc2c47088d64002a1020f415a8b995e8d408ea0fa87c114c8b117d45efd815\",
+\"public_key\":\"0311241d491539de3f622afe966e0377a2379997a00d06f0412661d2611c541978\"},
+
+{\"tx_hash\":\"3e24e38058cbd1f39d2f510de1bd39e82f61390750dce6517bc346ff00f60be9\",
+\"recipient\":\"1Q97qMnwdgUNvhTveTBy8F9Q4GQsbN8kTa\",
+\"status\":1,
+\"created_at\":\"2015-07-08T00:00:48.714Z\",
+\"updated_at\":\"2015-07-08T05:02:14.659Z\",
+\"private_key\":\"6e83e1336a252a67bc15716ac143bd6b47ec7dff0ac6261aa00579b29a3f0f3b\",
+\"public_key\":\"028c2b3752cb51cd1ba30284ae3fca378768b2511f91e92f342728ce20f14591a8\"},
+
+{\"tx_hash\":\"52f3a8cd1d346efd018f8de36078e1615c7b20489fbead8052194b1686dcc9d5\",
+\"recipient\":\"1DsRASAzeh94FwGHQutKgsbgogSfeGfrCV\",
+\"status\":1,
+\"created_at\":\"2015-05-11T00:01:07.658Z\",
+\"updated_at\":\"2015-05-11T17:11:41.661Z\",
+\"private_key\":\"1b4de613b393415422031dffa6f17b8701c9249bd1096625f12f5205820aefb2\",
+\"public_key\":\"035311a5c807df1835184077423b28c08c99c59dd9722b9e70de7297f4807e5ed5\"},
+
+{\"tx_hash\":\"de7614884e8e6a02c79357f4d54d12fcf1ca6b2f05910c4099f9dbcd2d5ae707\",
+\"recipient\":\"1CvynMV8j7MaMSpK822sFQcu1h5QP7L2QT\",
+\"status\":1,
+\"created_at\":\"2015-05-12T00:00:55.493Z\",
+\"updated_at\":\"2015-05-12T11:02:43.981Z\",
+\"private_key\":\"c885799eeb6a78c858c5dc039dcfbad50dd008ce4b8b51e8b56a1c2fcefa3984\",
+\"public_key\":\"037108b890b7b7d18d47652df4d0a047bd99839ebb96de2fdb79b029f54d1ea898\"}]"
+|#
 \"status\":1,
 \"created_at\":\"2015-07-10T00:00:58.275Z\",
 \"updated_at\":\"2015-07-10T04:11:23.760Z\",

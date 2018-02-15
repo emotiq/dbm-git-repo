@@ -1,6 +1,29 @@
 ;; mod-math.lisp -- Prime Field Arithmetic
 ;; DM/Acudora 11/11
 ;; -----------------------------------------------------
+#|
+The MIT License
+
+Copyright (c) 2017-2018 Refined Audiometrics Laboratory, LLC
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+|#
 
 (in-package :crypto-mod-math)
 
@@ -175,14 +198,12 @@
 #||#
 (defun mult-mod (m arg &rest args)
   (declare (integer m arg))
-  (let ((blinder (get-blinder m)))
+  (let* ((blinder (get-blinder m)))
     (declare (integer blinder))
-    (reduce (lambda (prod x)
-              (declare (integer prod x))
-              ;; (mult-mod1 m prod x)
-              (mod (* prod (+ x blinder)) m))
-            args
-            :initial-value (+ arg blinder))))
+    (dolist (opnd args arg)
+      (declare (integer opnd))
+      (setf arg (mod (* arg (+ opnd blinder)) m)))
+    ))
 
 #|
 (defun split* (m a b)
@@ -258,7 +279,7 @@
       (mod (- (+ arg blinder)) m))))
 |#
 ;; ------------------------------------------------------------
-
+#|
 (defun add-mod (m arg &rest args)
   (declare (integer m arg))
   (let ((blinder (get-blinder m)))
@@ -286,6 +307,29 @@
                  :initial-value (+ arg blinder))
        (- (+ arg blinder)))
      m)))
+|#
+
+(defun add-mod (m arg &rest args)
+  (declare (integer m arg))
+  (let* ((blinder (get-blinder m))
+         (ans     (+ arg blinder)))
+    (declare (integer blinder ans))
+    (dolist (opnd args)
+      (declare (integer opnd))
+      (incf ans (+ opnd blinder)))
+    (mod ans m)))
+
+(defun sub-mod (m arg &rest args)
+  (declare (integer m arg))
+  (let* ((blinder (get-blinder m))
+         (ans     (- arg blinder)))
+    (declare (integer blinder ans))
+    (if args
+        (dolist (opnd args)
+          (declare (integer opnd))
+          (decf ans (+ opnd blinder)))
+      (setf ans (- ans)))
+    (mod ans m)))
 
 ;; ------------------------------------------------------------
 #|
@@ -329,13 +373,10 @@
 
 (defun div-mod (m arg &rest args)
   (declare (integer m arg))
-  (if args
-      (reduce (lambda (quot dvsr)
-                (declare (integer quot dvsr))
-                (mult-mod m quot (inv-mod m dvsr)))
-              args
-              :initial-value arg)
-    (inv-mod m arg)))
+  (dolist (opnd args
+                (if args arg (inv-mod m arg)))
+    (declare (integer opnd))
+    (setf arg (mult-mod m arg (inv-mod m opnd)))))
 
 #|
 (defvar *mrs-cs*
