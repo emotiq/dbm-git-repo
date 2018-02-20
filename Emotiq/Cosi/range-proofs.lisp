@@ -464,7 +464,7 @@ THE SOFTWARE.
              (p         (ed-decompress-pt (dot-prod-proof-pcmt dot-proof))))
         
         (when (ed-pt= chk-p-l p)
-          (fast-validate-dot-prod-proof dot-proof))
+          (validate-dot-prod-proof dot-proof))
         ))))
 
 ;; -----------------------------------------------------------
@@ -561,7 +561,7 @@ THE SOFTWARE.
       )))
 
 ;; -------------------------------------------------------
-
+#||#
 (defun validate-dot-prod-proof (proof)
   (let* ((u         (ed-decompress-pt (dot-prod-proof-u proof)))
          (p         (ed-decompress-pt (dot-prod-proof-pcmt proof)))
@@ -609,7 +609,7 @@ THE SOFTWARE.
                              hl hr)))
             (iter gp hp pp (cdr xlrs))))
         ))))
-               
+#||#             
 ;; --------------------------------------------------------------
 
 (defun compute-svec (xlrs nbits)
@@ -666,7 +666,7 @@ THE SOFTWARE.
 (defun timing-test (&optional (niter 10))
   (let* ((vals   (loop repeat niter collect (random-between 0 #.(ash 1 64))))
          (proofs (time (apply 'make-range-proofs 64 vals))))
-    (time (validate-range-proofs proofs))
+    (assert (time (validate-range-proofs proofs)))
     proofs))
 |#
 
