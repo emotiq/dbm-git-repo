@@ -38,12 +38,18 @@ THE SOFTWARE.
   :license     "Copyright (c) 2018 by Emotiq, A.G. License terms apply."
   :components  (
 		(:file "cosi-async")
-		;; (:file "cosi")
+
+                ;; (:file "cosi")
 		;; (:file "tst-cas")
                 ;; (:file "cosi-socket")
-                (:file :cosi-construction)
-                (:file :cosi-sockets)
-                (:file :cosi-handlers)
+
+                (:file "cosi-construction")
+                (:file "cosi-sockets")
+                (:file "cosi-handlers")
+
+                (:file "range-proofs")
+                (:file "confidential-purchase")
+                
                 ;; (:file :random-partition)
                 )
   :SERIAL T
